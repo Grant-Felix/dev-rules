@@ -1,0 +1,17 @@
+# 依赖与构建产物（本插件零依赖，这里主要是防手滑）
+node_modules/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# 本地运行产物
+*.log
+*.tmp
+dev-rules.json
+dev-rules.json.bak
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/
+*.swp

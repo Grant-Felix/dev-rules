@@ -1,0 +1,14 @@
+# dev-rules bundle patch：把本插件行插入 profile 阵容。
+#
+# 作为 profile bundle 层（package.json 的 dsh.bundle.patch 字段）叠加到
+# dsh-base 之上；启用方式（profile 目录内）：
+#   dsh plugin --profile web add link:/path/to/本目录
+#   然后把 "dev-rules" 追加到 profile package.json 的 dsh.profile.bundles
+#
+# 行内容为按包名注册的裸插件行：exports "." 的 node 半体运行在宿主进程
+# （规则存储 / 系统提示注入 / HTTP 面板接口 / dev_rules 工具），
+# package.json 的 dsh.client 声明把 exports "./client" 的浏览器半体
+# （侧边栏「开发规则」面板）加载进 web GUI。
+- insert:
+    - id: dev-rules
+      name: 'dev-rules'
