@@ -204,6 +204,18 @@ test('client 内部件：筛选行显示判定（规则虽少、筛选仍生效�
 	assert.equal(shouldShowFilters(3, '   ', ''), false, '只有空白字符不算筛选条件')
 })
 
+test('client 内部件：Ctrl/Cmd+S 放行判定与主动作按钮同护栏', () => {
+	const { registration, require } = loadBundle()
+	const exports = registration.factory(require)
+	const { canShortcutSave } = exports.__internal
+
+	assert.equal(canShortcutSave(false, true), true, '有未保存改动、且不在保存中：放行')
+	// 这两条是真问题所在：无改动时保存会冲掉 .bak 里的「上一版」，保存中再按则是并发写
+	assert.equal(canShortcutSave(false, false), false, '没有未保存改动时不该发起保存')
+	assert.equal(canShortcutSave(true, true), false, '保存进行中不该重复发起')
+	assert.equal(canShortcutSave(true, false), false)
+})
+
 test('client 内部件：token 粗估与导入合并（按 id + 标题/正文去重）', () => {
 	const { registration, require } = loadBundle()
 	const exports = registration.factory(require)
