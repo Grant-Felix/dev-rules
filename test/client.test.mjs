@@ -226,6 +226,70 @@ test('client bundle：「放弃修改并重新载入」走磁盘重读接口（�
 	assert.match(source, /load\(true\)/, '「放弃修改并重新载入」按钮必须要求从磁盘读')
 })
 
+test('client 内部件：上限快照与卡片体量标签', () => {
+	const { registration, require } = loadBundle()
+	const exports = registration.factory(require)
+	const { limitsOf, sizeLabel } = exports.__internal
+
+	// 上限只有一处出处（宿主随 meta 下发）；宿主没给就留空，不在这里复制常量
+	assert.deepEqual(limitsOf({ limits: { title: 120, group: 60, content: 4000, rules: 300 } }), {
+		title: 120,
+		group: 60,
+		content: 4000,
+		rules: 300,
+	})
+	const unknown = { title: undefined, group: undefined, content: undefined, rules: undefined }
+	assert.deepEqual(limitsOf(null), unknown)
+	assert.deepEqual(limitsOf({}), unknown)
+	assert.deepEqual(limitsOf({ limits: { content: 0, title: -1, group: 'x', rules: Number.NaN } }), unknown)
+
+	// 卡片平常只报体量；某一栏顶到上限时要把上限写出来（maxLength 什么都不说）
+	assert.equal(sizeLabel({ title: 'A', content: 'bc' }, {}), '约 3 字')
+	assert.equal(sizeLabel({ title: 'A', content: 'bc' }, { title: 120, content: 4000 }), '约 3 字')
+	assert.equal(sizeLabel({ title: 'T'.repeat(120), content: 'c' }, { title: 120, content: 4000 }), '约 121 字（标题上限 120）')
+	assert.equal(sizeLabel({ title: 'a', content: 'c'.repeat(4000) }, { title: 120, content: 4000 }), '约 4001 字（正文上限 4000）')
+	assert.equal(
+		sizeLabel({ title: 'T'.repeat(120), content: 'c'.repeat(4000) }, { title: 120, content: 4000 }),
+		'约 4120 字（标题上限 120 / 正文上限 4000）',
+	)
+})
+
+test('client 内部件：保存前拦下会被宿主静默丢掉的内容', () => {
+	const { registration, require } = loadBundle()
+	const exports = registration.factory(require)
+	const { validateDoc } = exports.__internal
+
+	const limits = { title: 120, group: 60, content: 4000, rules: 3 }
+	const doc = (global, projects) => ({ enabled: true, global, projects })
+	const rule = (title, content) => ({ id: 'r' + title + content, title, content, group: '', enabled: true })
+
+	assert.equal(validateDoc(doc([rule('A', 'a')], []), limits), null, '正常文档放行')
+
+	// 空白项目目录：既有行为，切到项目页签
+	const blankPath = validateDoc(doc([], [{ id: 'p', path: '  ', rules: [] }]), limits)
+	assert.equal(blankPath.tab, 'projects')
+	assert.match(blankPath.text, /还没填目录/)
+
+	// 空规则会被宿主的 normalizeRules 直接丢掉：必须先在面板拦下，与空白目录同级
+	const blankGlobal = validateDoc(doc([rule('', ''), rule('A', 'a')], []), limits)
+	assert.equal(blankGlobal.tab, 'global')
+	assert.match(blankGlobal.text, /有 1 条规则的标题和正文都是空的/)
+	const blankProject = validateDoc(doc([], [{ id: 'p', path: '/tmp/p', rules: [rule('  ', '')] }]), limits)
+	assert.equal(blankProject.tab, 'projects')
+	assert.match(blankProject.text, /有 1 条规则/)
+
+	// 超过每列表上限：多余的会被丢掉
+	const overGlobal = validateDoc(doc([rule('A', 'a'), rule('B', 'b'), rule('C', 'c'), rule('D', 'd')], []), limits)
+	assert.equal(overGlobal.tab, 'global')
+	assert.match(overGlobal.text, /全局规则有 4 条，超过上限 3 条/)
+	const overProject = validateDoc(
+		doc([], [{ id: 'p', path: '/tmp/p', label: '博客', rules: [rule('A', 'a'), rule('B', 'b'), rule('C', 'c'), rule('D', 'd')] }]),
+		limits,
+	)
+	assert.equal(overProject.tab, 'projects')
+	assert.match(overProject.text, /项目「博客」有 4 条规则，超过上限 3 条/)
+})
+
 test('client 内部件：token 粗估与导入合并（按 id + 标题/正文去重）', () => {
 	const { registration, require } = loadBundle()
 	const exports = registration.factory(require)

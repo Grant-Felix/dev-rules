@@ -14,6 +14,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { apply, name, inject } from '../lib/index.js'
+import { MAX_CONTENT, MAX_GROUP, MAX_RULES, MAX_SECTION_CHARS, MAX_TITLE } from '../lib/rules.js'
 
 /** 最小 ctx 桩：只实现本插件用到的注册面，并记录 disposer。 */
 function makeCtx(extra = {}) {
@@ -191,6 +192,14 @@ test('接口：state / workspaces / save / preview / reload 与落盘 + 备份',
 	assert.equal(initial.status, 200)
 	assert.equal(initial.payload.meta.file, path.join(home, 'dev-rules.json'))
 	assert.equal(initial.payload.meta.backupFile, path.join(home, 'dev-rules.json.bak'))
+	// 逐条上限随 /state 下发，面板据此设 maxLength：与 rules.js 的常量必须是同一份
+	assert.deepEqual(initial.payload.meta.limits, {
+		title: MAX_TITLE,
+		group: MAX_GROUP,
+		content: MAX_CONTENT,
+		rules: MAX_RULES,
+	})
+	assert.equal(initial.payload.meta.maxSectionChars, MAX_SECTION_CHARS)
 
 	const workspaces = await callRoute(ctx, 'GET', '/dev-rules/workspaces')
 	assert.deepEqual(
