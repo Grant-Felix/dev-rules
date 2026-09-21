@@ -290,6 +290,20 @@ test('client 内部件：保存前拦下会被宿主静默丢掉的内容', () =
 	assert.match(overProject.text, /项目「博客」有 4 条规则，超过上限 3 条/)
 })
 
+test('client bundle：顶部吸顶条（源码级守卫）', () => {
+	// sticky 是纯样式，Node 里既没有 DOM 也没有布局可测，只能对着源码钉住：
+	// 这条守卫防的是「有人把 position: sticky 或底色删掉」—— README 两处都写了
+	// 顶部吸顶条，而面板正是靠它保证长列表滚下去后主动作还在。
+	const source = readFileSync(bundlePath, 'utf8')
+	const block = /\.dr_top\s*\{([^}]*)\}/.exec(source)
+	assert.ok(block !== null, '应存在 .dr_top 样式块')
+	assert.match(block[1], /position:\s*sticky/, '.dr_top 必须吸顶')
+	assert.match(block[1], /top:\s*0/, '吸顶条要贴在滚动容器顶部')
+	const background = /background:\s*([^;]+);/.exec(block[1])
+	assert.ok(background !== null, '吸顶条要有底色，否则滚动内容会从它底下透出来')
+	assert.notEqual(background[1].trim(), 'transparent', '底色不能是 transparent')
+})
+
 test('client 内部件：token 粗估与导入合并（按 id + 标题/正文去重）', () => {
 	const { registration, require } = loadBundle()
 	const exports = registration.factory(require)
