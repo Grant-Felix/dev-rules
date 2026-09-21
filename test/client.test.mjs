@@ -216,6 +216,16 @@ test('client 内部件：Ctrl/Cmd+S 放行判定与主动作按钮同护栏', ()
 	assert.equal(canShortcutSave(true, false), false)
 })
 
+test('client bundle：「放弃修改并重新载入」走磁盘重读接口（源码级守卫）', () => {
+	// 这条修复的全部内容就是「显式动作打到哪个接口」，而组件在 Node 里渲染不了
+	// （react 桩的 createElement 返回 null，effect 也不会跑），只能对着源码钉住接线：
+	// 必须真的向 /reload 发 POST（文件头的注释里提到 /reload 不算数），
+	// 且那个按钮必须以 fromDisk=true 调 load。
+	const source = readFileSync(bundlePath, 'utf8')
+	assert.match(source, /postJson\('\/reload'/, '显式重载必须调用宿主的 /reload 接口')
+	assert.match(source, /load\(true\)/, '「放弃修改并重新载入」按钮必须要求从磁盘读')
+})
+
 test('client 内部件：token 粗估与导入合并（按 id + 标题/正文去重）', () => {
 	const { registration, require } = loadBundle()
 	const exports = registration.factory(require)
