@@ -1,4 +1,4 @@
-# dev-rules · Felix 项目开发规则
+# dsh-dev-rules · Felix 项目开发规则
 
 DSH（DeepSeek Harness）个人插件：把你自己的一套**项目开发规则**交给 DSH，让 agent 在开发项目时自动遵守。
 
@@ -32,20 +32,17 @@ DSH（DeepSeek Harness）个人插件：把你自己的一套**项目开发规�
 
 ## 二、安装
 
-本插件是标准的 DSH profile bundle（双半体：宿主 + 浏览器）。在插件目录下：
+本插件是标准的 DSH profile bundle（双半体：宿主 + 浏览器），需要已安装 `dsh` CLI（`npm install -g @deepseek-ai/dsh`）与 pnpm。
 
 ```sh
-# 1) 作为 link 依赖装进 profile（profile 名按实际填写，本机是 web）
-dsh plugin --profile web add "link:$PWD"
-#    或（pnpm store 不可写时）手工建软链：
-#    ln -sfn "$PWD" "$DSH_HOME/profiles/web/node_modules/dev-rules"
+# 用户安装：从 npm 装（推荐，跟随最新版本）
+dsh plugin --profile web add dsh-dev-rules
 
-# 2) 把 bundle 加进 profile 阵容：编辑 $DSH_HOME/profiles/web/package.json，
-#    在 dsh.profile.bundles 数组末尾追加 "dev-rules"，
-#    并在 dependencies 里写 "dev-rules": "link:<插件目录>"
-
-# 3) 重启该 profile（右侧栏页面列表里会出现「开发规则」）
+# 仓库开发调试：链到本地检出
+dsh plugin --profile web add link:$PWD
 ```
+
+`dsh plugin` 就是 pnpm 的透传：装完它会把声明了 `dsh.bundle` 的依赖**自动登记进 `dsh.profile.bundles`**，不必手工改 profile 的 `package.json`。装完重启该 profile（侧边栏底部 ↻），右侧栏页面列表里就会出现「开发规则」。
 
 改动生效范围（**本部署实测**）：
 
@@ -56,7 +53,7 @@ dsh plugin --profile web add "link:$PWD"
 
 > 为什么客户端改动也要重启：DSH 的 `client-modules` 在**启动时**把每个插件的 client bundle 读进内存（`readFileSync` + 内容哈希当 `rev`），之后只按「已登记的 URL」出字节；文件内容变化要经 HMR watcher 的 `rebuilt(id)` 才会重新登记，而 watcher 只有在源码检出里跑着 `pnpm run dev:web` 时才装得上。本机是安装版部署、没有跑 dev watcher，所以**硬刷新页面拿不到新 bundle**，必须重启一次 profile。
 
-卸载：从 `dsh.profile.bundles` 移除 `dev-rules`、删掉依赖与软链，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
+卸载：`dsh plugin --profile web remove dsh-dev-rules`，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
 
 ## 三、数据
 
