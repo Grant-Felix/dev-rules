@@ -42,4 +42,7 @@ jobs:
           package-manager-cache: false
       # 本插件零依赖（也就没有 lockfile），所以不需要 npm ci，直接跑测试
       - run: npm test
-      - run: npm publish
+      # --tag latest 是必需的：本仓版本号是「发布日期式 + 当日序号」（如 26.9.21-1），
+      # 在 semver 里属于 prerelease，不带 --tag 时 npm 会直接拒绝发布：
+      #   You must specify a tag using --tag when publishing a prerelease version.
+      - run: npm publish --tag latest
