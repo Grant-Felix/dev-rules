@@ -70,13 +70,49 @@ ensure_profile() {
 
 cmd="${1:-boot}"
 
+# 客户端 bundle 注册的 id 必须等于包名。DSH 的客户端模块图是按**包名**建行的
+# （dsh-client-modules：`table.set(packageName, { entry: graphRow(packageName, …) })`），
+# 对不上就在启动时报「Failed to load plugins：loaded without registering …」——
+# 界面直接打不开，而宿主接口还是好的：只 curl /dev-rules/state 根本看不出来。
+#
+# 仓库里的用例只保证「检出里的文件」一致；这里保证**沙箱里装的那一份**一致 ——
+# 来源换成 github: / git+… 时，两者未必是同一份代码。
+verify_client_id() {
+  local dir="$sandbox_home/profiles/web/node_modules/dsh-dev-rules"
+  [ -d "$dir" ] || { echo "沙箱里找不到已安装的插件目录：$dir" >&2; exit 1; }
+  PLUGIN_DIR="$dir" node --input-type=module <<'NODE'
+import { readFileSync } from 'node:fs'
+const dir = process.env.PLUGIN_DIR
+const pkg = JSON.parse(readFileSync(dir + '/package.json', 'utf8'))
+const field = pkg.exports?.['./client']
+const rel = typeof field === 'string' ? field : (field?.default ?? '')
+if (rel === '') {
+  console.error('package.json 没有 exports["./client"]，DSH 找不到客户端半体')
+  process.exit(1)
+}
+const source = readFileSync(dir + '/' + rel.replace(/^\.\//, ''), 'utf8')
+// 允许 load({ 与 id: 之间夹注释与空白：本文件恰好就在那儿写明了「为什么 id 必须等于包名」
+const found = /__ModuleLoader__\s*\.\s*load\s*\(\s*\{[\s\S]{0,600}?\bid:\s*['"]([^'"]+)['"]/.exec(source)
+if (found === null) {
+  console.error('客户端 bundle 里没有 __ModuleLoader__.load({ id })')
+  process.exit(1)
+}
+if (found[1] !== pkg.name) {
+  console.error(`客户端注册 id「${found[1]}」≠ 包名「${pkg.name}」：DSH 启动会报 Failed to load plugins`)
+  process.exit(1)
+}
+console.log(`✓ 客户端注册 id 与包名一致：${pkg.name}`)
+NODE
+}
+
 case "$cmd" in
   check)
     # 组装能过 ≠ 运行能过，但组装过不了就一定起不来；先把它和自检一起卡掉最便宜
     npm --prefix "$repo" run check
     ensure_profile
+    verify_client_id
     dsh --profile web --dump-config >/dev/null
-    echo "✓ 自检与 profile 组装都通过（沙箱 home：$sandbox_home，来源：$source_spec）"
+    echo "✓ 自检、客户端注册 id 与 profile 组装都通过（沙箱 home：$sandbox_home，来源：$source_spec）"
     ;;
   install)
     ensure_profile

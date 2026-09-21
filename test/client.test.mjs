@@ -108,7 +108,12 @@ function loadBundle() {
 
 test('client bundle：注册工厂、导出 apply/inject', () => {
 	const { registration, require } = loadBundle()
-	assert.equal(registration.id, 'dev-rules')
+	// 不是写死某个字符串，而是与包名对齐：DSH 的客户端模块图按包名索引，
+	// 注册 id 与包名不一致时启动会报「Failed to load plugins：loaded without
+	// registering "<包名>" via __ModuleLoader__.load」。包名一改这条就必须跟着改 ——
+	// 曾经因为漏改这一处，一次重启直接把界面打成「插件加载失败」。
+	const manifest = JSON.parse(readFileSync(path.join(here, '..', 'package.json'), 'utf8'))
+	assert.equal(registration.id, manifest.name)
 	assert.equal(typeof registration.factory, 'function')
 
 	const exports = registration.factory(require)
