@@ -32,17 +32,22 @@ DSH（DeepSeek Harness）个人插件：把你自己的一套**项目开发规�
 
 ## 二、安装
 
-本插件是标准的 DSH profile bundle（双半体：宿主 + 浏览器），需要已安装 `dsh` CLI（`npm install -g @deepseek-ai/dsh`）与 pnpm。
+本插件是标准的 DSH profile bundle（双半体：宿主 + 浏览器），需要已安装 `dsh` CLI（`npm install -g @deepseek-ai/dsh`）与 pnpm。按你的网络从下面两条来源里选一条：
 
 ```sh
-# 用户安装：从 npm 装（推荐，跟随最新版本）
-dsh plugin --profile web add dsh-dev-rules
+# 能直连 GitHub
+dsh plugin --profile web add github:Grant-Felix/dev-rules
+
+# 国内走 Gitee 镜像（pnpm 没有 gitee: 简写，用完整地址）
+dsh plugin --profile web add git+https://gitee.com/Grant-Felix/dev-rules.git
 
 # 仓库开发调试：链到本地检出
 dsh plugin --profile web add link:$PWD
 ```
 
-`dsh plugin` 就是 pnpm 的透传：装完它会把声明了 `dsh.bundle` 的依赖**自动登记进 `dsh.profile.bundles`**，不必手工改 profile 的 `package.json`。装完重启该 profile（侧边栏底部 ↻），右侧栏页面列表里就会出现「开发规则」。
+`dsh plugin` 就是 pnpm 的透传：装完它会按**包名**把插件自动登记进 `dsh.profile.bundles`，不必手工改 profile 的 `package.json`。装完重启该 profile（侧边栏底部 ↻），右侧栏页面列表里就会出现「开发规则」。
+
+> **为什么没有 npm 包名可以 `add`**：`dev-rules` 这个包名在 npm 上已被别人占用；改名的 `dsh-dev-rules` 首发受 npm 现行的 2FA 发布策略阻挡（细粒度令牌那条路 2027 年 1 月还要再收窄）。所以对外以 **git 来源**分发：GitHub 给直连用户，Gitee 给国内用户。
 
 改动生效范围（**本部署实测**）：
 
@@ -53,7 +58,7 @@ dsh plugin --profile web add link:$PWD
 
 > 为什么客户端改动也要重启：DSH 的 `client-modules` 在**启动时**把每个插件的 client bundle 读进内存（`readFileSync` + 内容哈希当 `rev`），之后只按「已登记的 URL」出字节；文件内容变化要经 HMR watcher 的 `rebuilt(id)` 才会重新登记，而 watcher 只有在源码检出里跑着 `pnpm run dev:web` 时才装得上。本机是安装版部署、没有跑 dev watcher，所以**硬刷新页面拿不到新 bundle**，必须重启一次 profile。
 
-卸载：`dsh plugin --profile web remove dsh-dev-rules`，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
+升级：`dsh plugin --profile web update dsh-dev-rules`（git 来源的版本由 profile 的 lockfile 锁在某个提交上，`update` 会重新解析到分支最新提交）。卸载：`dsh plugin --profile web remove dsh-dev-rules`，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
 
 ## 三、数据
 
