@@ -162,13 +162,28 @@ dsh plugin --profile web add link:$PWD
 ## 七、开发
 
 ```sh
-node --test     # 24 个用例
+node --test     # 42 个用例
 npm run check   # 语法检查 + 全部测试
 ```
 
+**改完先在隔离沙箱里验，别拿日常在用的那个 profile 试。** 宿主半体是在 profile 启动时加载的：一个有问题的改动足以让整个 DSH 起不来，那时你连界面都进不去，只能去终端里拆插件。
+
+```sh
+npm run sandbox         # 在 .sandbox/home 里装本地检出并起一个实例（默认 :3199，Ctrl-C 结束）
+npm run sandbox:check   # 只做自检 + profile 组装，不启动（提交前跑这个最快）
+npm run sandbox:clean   # 删掉沙箱
+
+# 想验「使用者装到的到底是什么」：把来源换成发布的那份再起
+DSH_SANDBOX_SOURCE=github:Grant-Felix/dev-rules npm run sandbox
+DSH_SANDBOX_SOURCE=git+https://gitee.com/Grant-Felix/dev-rules.git npm run sandbox
+```
+
+沙箱有独立的 `DSH_HOME`，所以它读写的是自己的 `dev-rules.json`，**不会碰你的真实规则文件**；脚本还会拒绝把沙箱 home 指到真实 home。默认端口可用 `DSH_SANDBOX_PORT` 改。
+
 - `lib/rules.js` 纯逻辑（规范化 / 路径匹配 / 生效规则 / 渲染 / 分组 / token 估算 / Markdown 往返），宿主、面板与测试共用；路径匹配的 win32 分支通过 platform 参数可测。
 - `lib/index.js` 宿主半体：存储、提示变量注入、`/dev-rules/*` 接口、`dev_rules` 工具。
-- `lib/client.js` 浏览器半体：手写的 `window.__ModuleLoader__.load({ id, factory })` bundle，只依赖 `react`，不需要打包器；纯函数内部件（token 估算 / 导入合并）通过 `exports.__internal` 暴露给测试。
+- `lib/client.js` 浏览器半体：手写的 `window.__ModuleLoader__.load({ id, factory })` bundle，只依赖 `react`，不需要打包器；纯函数内部件（token 估算 / 导入合并 / 更新提示判定）通过 `exports.__internal` 暴露给测试。
+- `scripts/sandbox.sh`：上面那套隔离环境的实现（独立 `DSH_HOME` + 独立端口 + 安全闸）。
 - 测试：`test/rules.test.mjs`（逻辑）、`test/host.test.mjs`（接口 / 备份 / 409 / 403 / 415 / 软链回退 / 工具）、`test/client.test.mjs`（槽位接线 / 服务晚出现 / 内部件）。
 - CI：`.github/workflows/ci.yml` 在 node 20 / 22 / 24 上跑语法检查 + 测试。
 
