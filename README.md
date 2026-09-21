@@ -58,7 +58,7 @@ dsh plugin --profile web add link:$PWD
 
 > 为什么客户端改动也要重启：DSH 的 `client-modules` 在**启动时**把每个插件的 client bundle 读进内存（`readFileSync` + 内容哈希当 `rev`），之后只按「已登记的 URL」出字节；文件内容变化要经 HMR watcher 的 `rebuilt(id)` 才会重新登记，而 watcher 只有在源码检出里跑着 `pnpm run dev:web` 时才装得上。本机是安装版部署、没有跑 dev watcher，所以**硬刷新页面拿不到新 bundle**，必须重启一次 profile。
 
-升级：`dsh plugin --profile web update dsh-dev-rules`（git 来源的版本由 profile 的 lockfile 锁在某个提交上，`update` 会重新解析到分支最新提交）。卸载：`dsh plugin --profile web remove dsh-dev-rules`，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
+升级：在**插件市场**的「更新」里一键完成（它按 profile 的 lockfile 锁定的提交与远端 HEAD 比对，并自带 git 更新的回滚），或命令行 `dsh plugin --profile web update dsh-dev-rules`（重新解析到分支最新提交）。卸载：`dsh plugin --profile web remove dsh-dev-rules`，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
 
 ## 三、数据
 
