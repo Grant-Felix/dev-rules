@@ -389,3 +389,325 @@ test('client 内部件：token 粗估与导入合并（按 id + 标题/正文去
 	assert.match(overridden[1], /挡掉的全局规则：2 条/)
 	assert.match(overridden[2], /已截断/)
 })
+
+// ---------------------------------------------------------------- 插件自更新
+
+/** 市场 UPDATE-API-v1 的实测文档形状（capabilities 与 updates 的 package）。 */
+const CAPABILITIES = {
+	schema: 'dsh-market/update-api/v1',
+	apiVersion: 1,
+	stability: 'beta',
+	marketVersion: '0.9.0',
+	profile: 'web',
+	bootId: 'boot-1',
+	runtime: 'web',
+	features: { check: true, update: true, progress: true, rollback: true, restart: true, updatesSummary: true },
+	restart: { supported: true, managedBy: 'market', supervisor: null, debugger: null },
+	operationRetention: 'current-process',
+	operationLimit: 50,
+	endpoints: {
+		updates: '/dsh-market/api/v1/updates',
+		updatesSummary: '/dsh-market/api/v1/updates/summary',
+		operations: '/dsh-market/api/v1/operations',
+		rollback: '/dsh-market/api/v1/rollback',
+		restart: '/dsh-market/api/v1/restart',
+	},
+}
+
+const SHA_OLD = '0b8a9b7c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60'
+const SHA_NEW = 'd054f3d1a2b3c4d5e6f708192a3b4c5d6e7f8091'
+const CAPS = { rollback: true, restart: true }
+const NO_RESTART = { rollback: false, restart: false }
+const BEHIND = {
+	name: 'dsh-dev-rules',
+	source: 'github',
+	installedVersion: SHA_OLD,
+	latestVersion: SHA_NEW,
+	updateAvailable: true,
+	channelSwitch: null,
+}
+
+test('client 内部件：短 sha 与更新中按钮的百分比', () => {
+	const { registration, require } = loadBundle()
+	const { shortVersion, updatingLabel } = registration.factory(require).__internal
+
+	// git 来源给的是 40 位 commit sha：提示里只放前 7 位
+	assert.equal(shortVersion(SHA_NEW), 'd054f3d')
+	assert.equal(shortVersion('0b8a9b7'), '0b8a9b7')
+	// npm 来源是语义化版本：一律截断会把 1.2.0-beta.1 截成 1.2.0-b
+	assert.equal(shortVersion('0.4.2'), '0.4.2')
+	assert.equal(shortVersion('1.2.0-beta.1'), '1.2.0-beta.1')
+	assert.equal(shortVersion('abc'), 'abc', '不足 7 位就不像 sha，原样用')
+	assert.equal(shortVersion(''), '')
+	assert.equal(shortVersion(undefined), '')
+	assert.equal(shortVersion(null), '')
+
+	assert.equal(updatingLabel({ progress: { percent: 42 } }), '更新中… 42%')
+	assert.equal(updatingLabel({ progress: { percent: 0 } }), '更新中… 0%')
+	assert.equal(updatingLabel({ progress: { percent: 42.6 } }), '更新中… 43%')
+	assert.equal(updatingLabel({ progress: { percent: 250 } }), '更新中… 100%', '越界值也不显示成 250%')
+	assert.equal(updatingLabel({ progress: { percent: -5 } }), '更新中… 0%')
+	// 市场没给百分比（progress.percent 为 null）时不编一个出来
+	assert.equal(updatingLabel({ progress: { percent: null } }), '更新中…')
+	assert.equal(updatingLabel({ progress: {} }), '更新中…')
+	assert.equal(updatingLabel({}), '更新中…')
+	assert.equal(updatingLabel(null), '更新中…')
+})
+
+test('client 内部件：更新终态判定（不认识的状态也当结束）', () => {
+	const { registration, require } = loadBundle()
+	const { isOperationTerminal, updateNotice } = registration.factory(require).__internal
+
+	assert.equal(isOperationTerminal({ state: 'queued' }), false)
+	assert.equal(isOperationTerminal({ state: 'running' }), false)
+	for (const state of ['succeeded', 'failed', 'cancelled', 'rolled-back']) {
+		assert.equal(isOperationTerminal({ state }), true, state + ' 是终态')
+	}
+	// 遇到没见过的状态还接着 1.5 秒一轮问下去，会把市场问成永动机
+	assert.equal(isOperationTerminal({ state: 'wat' }), true)
+	assert.equal(isOperationTerminal({}), true)
+	assert.equal(isOperationTerminal(null), true)
+	// 没有终态记录时，判定就是「按有没有新版本出提示」
+	assert.equal(updateNotice(BEHIND, null, CAPS).tone, 'update')
+})
+
+test('client 内部件：市场能力探测（探测不到就整块不渲染）', () => {
+	const { registration, require } = loadBundle()
+	const { capabilitiesOf } = registration.factory(require).__internal
+
+	assert.deepEqual(capabilitiesOf(CAPABILITIES), { rollback: true, restart: true })
+	// 重启按钮只认 restart.supported（文档明确要求特性探测）
+	assert.deepEqual(capabilitiesOf({ ...CAPABILITIES, restart: { supported: false, managedBy: 'desktop-host' } }), {
+		rollback: true,
+		restart: false,
+	})
+	assert.deepEqual(capabilitiesOf({ ...CAPABILITIES, features: { update: true, rollback: false } }), { rollback: false, restart: true })
+
+	// 探测不到：没装市场、响应为空、不是本契约的 schema、能力位说不支持更新 —— 全部当作没有入口
+	assert.equal(capabilitiesOf(null), null)
+	assert.equal(capabilitiesOf({}), null)
+	assert.equal(capabilitiesOf('<!doctype html>'), null)
+	assert.equal(capabilitiesOf({ ...CAPABILITIES, schema: 'dsh-market/update-api/v2' }), null)
+	assert.equal(capabilitiesOf({ ...CAPABILITIES, features: { update: false } }), null)
+	assert.equal(capabilitiesOf({ ...CAPABILITIES, features: {} }), null)
+})
+
+test('client 内部件：更新提示分支（无更新 / 有更新 / 进行中 / 成功需重启）', () => {
+	const { registration, require } = loadBundle()
+	const { updateNotice } = registration.factory(require).__internal
+
+	// 1) 没更新：什么都不显示（绝不常驻）
+	assert.equal(updateNotice({ ...BEHIND, updateAvailable: false, latestVersion: SHA_OLD }, null, CAPS), null)
+	assert.equal(updateNotice(null, null, CAPS), null)
+	assert.equal(updateNotice(undefined, undefined, CAPS), null)
+	// 市场探测不到：整块不渲染
+	assert.equal(updateNotice(BEHIND, null, null), null)
+	assert.equal(updateNotice(BEHIND, { state: 'running' }, null), null)
+
+	// 2) 有更新：短 sha 两头对照 + 一个「更新」按钮
+	const offer = updateNotice(BEHIND, null, CAPS)
+	assert.equal(offer.tone, 'update')
+	assert.equal(offer.text, '本插件有新版本：0b8a9b7 → d054f3d')
+	assert.deepEqual(offer.buttons, [{ id: 'update', label: '更新' }])
+
+	// 3) 更新中：按钮禁用，有百分比就带上
+	const busy = updateNotice(BEHIND, { state: 'running', progress: { percent: 42 } }, CAPS)
+	assert.equal(busy.tone, 'busy')
+	assert.deepEqual(busy.buttons, [{ id: 'update', label: '更新中… 42%', disabled: true }])
+	assert.deepEqual(updateNotice(BEHIND, { state: 'queued', progress: { percent: null } }, CAPS).buttons, [
+		{ id: 'update', label: '更新中…', disabled: true },
+	])
+
+	// 4) 成功且要重启/刷新：告诉用户重启才生效，可重启时给按钮
+	const succeeded = {
+		operationId: 'boot-1-update-1',
+		state: 'succeeded',
+		beforeVersion: SHA_OLD,
+		installedVersion: SHA_NEW,
+		outcome: { refreshRequired: false, restartRequired: true, rollback: { available: false, state: 'unavailable' } },
+	}
+	const done = updateNotice(BEHIND, succeeded, CAPS)
+	assert.equal(done.tone, 'ok')
+	assert.equal(done.text, '已更新到 d054f3d，重启 profile 后生效。')
+	assert.deepEqual(done.buttons, [{ id: 'restart', label: '重启 profile', variant: 'primary' }])
+	// 市场说这台机器不能重启：提示照给，但绝不留一个按不动的重启按钮
+	const doneNoRestart = updateNotice(BEHIND, succeeded, NO_RESTART)
+	assert.equal(doneNoRestart.text, '已更新到 d054f3d，重启 profile 后生效。')
+	assert.deepEqual(doneNoRestart.buttons, [])
+	// refreshRequired 同样要用户动手
+	const refreshed = updateNotice(BEHIND, { ...succeeded, outcome: { refreshRequired: true, restartRequired: false } }, CAPS)
+	assert.equal(refreshed.text, '已更新到 d054f3d，重启 profile 后生效。')
+	// 当场就生效（既不用重启也不用刷新）：没有要用户做的事，吸顶区让出来
+	assert.equal(updateNotice(BEHIND, { ...succeeded, outcome: { restartRequired: false, refreshRequired: false } }, CAPS), null)
+	// 回滚完成后市场把记录标成 rolled-back + 需要重启：文案得说回滚，而不是「已更新」
+	const rolledBack = updateNotice(BEHIND, { ...succeeded, state: 'rolled-back' }, CAPS)
+	assert.equal(rolledBack.text, '已回滚到 d054f3d，重启 profile 后生效。')
+	// cancelled 没有可看的终态内容：落回「有新版本」，把更新按钮还给用户
+	assert.equal(updateNotice(BEHIND, { state: 'cancelled' }, CAPS).text, '本插件有新版本：0b8a9b7 → d054f3d')
+})
+
+test('client 内部件：更新失败（市场文案原样、按 retryable 给重试、回滚受能力位约束）', () => {
+	const { registration, require } = loadBundle()
+	const { updateNotice } = registration.factory(require).__internal
+
+	// 实测的 AGENTS_RUNNING 终态：message 是市场写给用户看的现成文案，面板不改写
+	const agentsBusy = {
+		operationId: 'boot-1-update-1',
+		state: 'failed',
+		failure: { code: 'AGENTS_RUNNING', message: '有 agent 正在运行，等这轮结束再试。', retryable: true },
+		outcome: { restartRequired: false, refreshRequired: false, rollback: { available: false, state: 'unavailable', detail: null } },
+	}
+	const failed = updateNotice(BEHIND, agentsBusy, CAPS)
+	assert.equal(failed.tone, 'error')
+	assert.equal(failed.text, '有 agent 正在运行，等这轮结束再试。')
+	assert.deepEqual(failed.buttons, [{ id: 'retry', label: '重试' }])
+
+	// 不可重试（例如 DOWNGRADE_DETECTED）：不给重试按钮，但失败原因照给
+	const permanent = updateNotice(
+		BEHIND,
+		{ ...agentsBusy, failure: { code: 'DOWNGRADE_DETECTED', message: '目标版本比当前版本旧。', retryable: false } },
+		CAPS,
+	)
+	assert.equal(permanent.text, '目标版本比当前版本旧。')
+	assert.deepEqual(permanent.buttons, [])
+
+	// 有回滚点、且市场能力位说支持回滚时才给「回滚」
+	const rollbackReady = { ...agentsBusy, failure: { code: 'UPDATE_FAILED', message: '装包失败。', retryable: false }, outcome: { rollback: { available: true, state: 'available', detail: null } } }
+	assert.deepEqual(updateNotice(BEHIND, rollbackReady, CAPS).buttons, [{ id: 'rollback', label: '回滚' }])
+	assert.deepEqual(updateNotice(BEHIND, rollbackReady, NO_RESTART).buttons, [], '能力位说不能回滚就不给按钮')
+	assert.deepEqual(updateNotice(BEHIND, { ...rollbackReady, operationId: undefined }, CAPS).buttons, [], '不知道是哪次操作就没法回滚')
+
+	// 失败时优先展示失败本身，而不是顺手把「有新版本」摆出来
+	assert.equal(failed.tone, 'error')
+	// 市场连 failure 都没给：不编造原因，只说没给
+	assert.equal(updateNotice(BEHIND, { state: 'failed' }, CAPS).text, '更新失败，插件市场没有给出原因。')
+})
+
+test('client 内部件：请求失败收敛成一条提示（市场原文优先）', () => {
+	const { registration, require } = loadBundle()
+	const { failedOperation } = registration.factory(require).__internal
+
+	// 市场给了 failure（例如 409 的 OPERATION_BUSY）：文案与 retryable 都原样采信
+	assert.deepEqual(
+		failedOperation({ failure: { code: 'OPERATION_BUSY', message: '另一个更新正在进行。', retryable: true } }, '兜底', false),
+		{ state: 'failed', failure: { message: '另一个更新正在进行。', retryable: true } },
+	)
+	// 市场说不重试，调用方的兜底 retryable 不能把它翻过来
+	assert.equal(failedOperation({ failure: { message: '插件没有装在这个 profile 里。', retryable: false } }, '兜底', true).failure.retryable, false)
+	// 只有 error 的那种 4xx：文案同样是市场原文，retryable 由调用方定
+	assert.deepEqual(failedOperation({ error: 'plugin is not installed' }, '兜底', false), {
+		state: 'failed',
+		failure: { message: 'plugin is not installed', retryable: false },
+	})
+	// 实测中市场的重启路由把原因包在 result 里：能取到就用它的原文，别退化成「HTTP 403」
+	assert.equal(
+		failedOperation({ schema: 'dsh-market/update-api/v1', result: { error: 'self-restart is disabled for this host' } }, '兜底', false).failure.message,
+		'self-restart is disabled for this host',
+	)
+	// 网络层失败（连响应体都没有）：只能用面板的兜底文案
+	assert.deepEqual(failedOperation(undefined, '更新请求没有发出去：fetch failed', true), {
+		state: 'failed',
+		failure: { message: '更新请求没有发出去：fetch failed', retryable: true },
+	})
+	assert.equal(failedOperation(null, '更新请求没有发出去：x', true).state, 'failed')
+	// 什么都没有：不造一条空提示出来
+	assert.equal(failedOperation(null, '', true), null)
+	assert.equal(failedOperation({ failure: { message: '' } }, '', true), null)
+	// 收敛出来的东西就是 updateNotice 认得的那种「失败操作」
+	const { updateNotice } = registration.factory(require).__internal
+	assert.equal(updateNotice(BEHIND, failedOperation(null, '更新请求没有发出去：x', true), CAPS).text, '更新请求没有发出去：x')
+})
+
+test('client 内部件：请求失败的兜底文案分得清「没发出去」与「被市场拒了」', () => {
+	const { registration, require } = loadBundle()
+	const { failureMessage } = registration.factory(require).__internal
+
+	// 网络层失败：请求压根没到市场
+	const offline = new TypeError('fetch failed')
+	assert.equal(failureMessage(offline, '更新'), '没能连上插件市场，更新没有执行：fetch failed')
+	// 市场收到了但拒绝：说成「没发出去」会把排查方向带到网络上去
+	const rejected = new Error('plugin is not installed')
+	rejected.status = 404
+	assert.equal(failureMessage(rejected, '更新'), '插件市场拒绝了这次更新（HTTP 404）：plugin is not installed')
+	// 市场没给原因时别把「HTTP 404」重复两遍
+	const bare = new Error('HTTP 403')
+	bare.status = 403
+	assert.equal(failureMessage(bare, '重启'), '插件市场拒绝了这次重启（HTTP 403）。')
+	assert.equal(failureMessage('爆了', '回滚'), '没能连上插件市场，回滚没有执行：爆了')
+})
+
+test('client 内部件：从实测响应体里取 package / operation（照契约的形状解析）', () => {
+	const { registration, require } = loadBundle()
+	const { updateStatusOf, operationOf, capabilitiesOf } = registration.factory(require).__internal
+
+	// 下面三份是照本机 dshmarket（UPDATE-API-v1）实测响应抄下来的形状
+	const status = updateStatusOf({
+		schema: 'dsh-market/update-api/v1',
+		package: { name: 'dsh-dev-rules', source: 'github', installedVersion: SHA_OLD, latestVersion: SHA_NEW, updateAvailable: true, channelSwitch: null },
+	})
+	assert.equal(status.updateAvailable, true)
+	assert.equal(status.installedVersion, SHA_OLD)
+
+	const operation = operationOf({
+		schema: 'dsh-market/update-api/v1',
+		operation: {
+			schema: 'dsh-market/update-api/v1',
+			operationId: '12227-1789986459219-update-1',
+			kind: 'update',
+			packageName: 'dsh-dev-rules',
+			state: 'running',
+			createdAt: 1,
+			startedAt: 2,
+			finishedAt: null,
+			beforeVersion: SHA_OLD,
+			installedVersion: SHA_OLD,
+			progress: { phase: null, done: 0, total: null, percent: null, currentPackage: null, detail: null, downloaded: null, size: null },
+			outcome: { refreshRequired: false, restartRequired: false, rollback: { available: false, state: 'unavailable', detail: null } },
+			failure: null,
+		},
+	})
+	assert.equal(operation.operationId, '12227-1789986459219-update-1')
+	assert.equal(operation.state, 'running')
+
+	// 形状不对（出错页、别的服务、空响应体）时一律当没有，别把垃圾往提示里送
+	assert.equal(updateStatusOf(null), null)
+	assert.equal(updateStatusOf({ package: null }), null)
+	assert.equal(updateStatusOf({ package: [] }), null)
+	assert.equal(operationOf({ operation: 'running' }), null)
+	assert.equal(operationOf(undefined), null)
+
+	// 实测的 capabilities：解析出来要能开重启按钮
+	assert.deepEqual(capabilitiesOf(CAPABILITIES), { rollback: true, restart: true })
+})
+
+test('client bundle：更新只用市场公开的 UPDATE-API-v1（源码级守卫）', () => {
+	// 组件在 Node 里渲染不了（react 桩的 createElement 返回 null），接口接线只能对着源码钉
+	const source = readFileSync(bundlePath, 'utf8')
+	assert.match(source, /const MARKET_API = '\/dsh-market\/api\/v1'/, '市场接口前缀是契约的一部分')
+	assert.match(source, /fetchMarket\('\/capabilities'\)/, '能力探测必须先做')
+	assert.match(source, /fetchMarket\('\/updates\?name='/)
+	assert.match(source, /marketPost\('\/updates', \{ packageName: PACKAGE_NAME \}\)/)
+	assert.match(source, /fetchMarket\('\/operations\?operationId='/)
+	assert.match(source, /marketPost\('\/rollback', \{ operationId \}\)/)
+	assert.match(source, /marketPost\('\/restart', \{\}\)/)
+	// 不碰市场的旧私有路由，也不自己装包：安装算法与回滚点只该有市场那一份
+	assert.equal(source.includes('/dsh-market/update'), false, '不得调用市场的旧私有路由')
+	assert.equal(/child_process|\bspawn\b|execSync/.test(source), false, '不自己装包')
+	// 只有用户主动点的「检查更新」才跳过市场缓存
+	assert.equal((source.match(/force=1/g) || []).length, 1)
+	assert.match(source, /check\(false\)/, '面板挂载时走市场缓存，别每次开面板都打网络')
+	assert.match(source, /update\.run\('check'\)/, '「更多（折叠）」里的「检查更新」接的是一次强制检查')
+})
+
+test('client bundle：更新条只在有内容时渲染、重启前必须确认（源码级守卫）', () => {
+	const source = readFileSync(bundlePath, 'utf8')
+	// 「绝不常驻」的接线：notice 为 null（没更新、也没在更新、也没刚失败）时整块不渲染
+	assert.match(source, /notice === null \? null : h\(UpdateBar, \{ notice, onAction: update\.run \}\)/)
+	// 只有市场上真说 updateAvailable 才走「有新版本」这条出提示的路
+	assert.match(source, /status\.updateAvailable !== true\) return null/)
+	// 重启会掐断当前会话：点了必须过 window.confirm
+	assert.match(source, /action === 'restart'\)\s*\{\s*if \(!window\.confirm\(/)
+	// 轮询到终态即停：定时器随 effect 清掉
+	assert.match(source, /if \(isOperationTerminal\(next\)\) \{\s*setOperationId\(null\)/)
+	assert.match(source, /clearInterval\(timer\)/)
+})
