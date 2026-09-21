@@ -16,8 +16,11 @@
 name: publish
 
 on:
-  push:
-    tags: ['v*']
+  # 现在只手动触发：`dsh-dev-rules` 还没在 npm 上存在，而 trusted publisher 只能配
+  # 在「已存在的包」上，所以此刻任何自动触发都只会以一个必失败的红色 run 收场。
+  # 等首发完成、trusted publisher 配好之后，再补上 tag 触发：
+  #   push:
+  #     tags: ['v*']
   workflow_dispatch:
 
 permissions:
