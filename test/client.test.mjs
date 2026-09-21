@@ -56,6 +56,8 @@ function loadBundle() {
 		},
 		useState: () => [undefined, () => {}],
 		useEffect: () => {},
+		// 面板用 layout effect 同步 ref（被动 effect 会被排成宏任务，可能晚于轮询 timer）
+		useLayoutEffect: () => {},
 		useCallback: (fn) => fn,
 		useRef: () => ({ current: null }),
 		createElement: () => null,
