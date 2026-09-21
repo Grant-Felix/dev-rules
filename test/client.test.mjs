@@ -190,6 +190,20 @@ test('client bundle：sidebarRightTabs 服务缺席时不报错、只需等它�
 	assert.equal(tabTypes.length, 0)
 })
 
+test('client 内部件：筛选行显示判定（规则虽少、筛选仍生效时必须保留控件）', () => {
+	const { registration, require } = loadBundle()
+	const exports = registration.factory(require)
+	const { shouldShowFilters } = exports.__internal
+
+	assert.equal(shouldShowFilters(7, '', ''), true, '规则多于 6 条就显示')
+	assert.equal(shouldShowFilters(6, '', ''), false, '6 条及以下不显示')
+	// 规则数掉下来但条件还生效：控件必须留着，否则规则被静默筛掉且无法清除
+	assert.equal(shouldShowFilters(6, 'npm', ''), true)
+	assert.equal(shouldShowFilters(0, '', '__none__'), true)
+	assert.equal(shouldShowFilters(3, '', '依赖'), true)
+	assert.equal(shouldShowFilters(3, '   ', ''), false, '只有空白字符不算筛选条件')
+})
+
 test('client 内部件：token 粗估与导入合并（按 id + 标题/正文去重）', () => {
 	const { registration, require } = loadBundle()
 	const exports = registration.factory(require)
