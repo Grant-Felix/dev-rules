@@ -74,7 +74,7 @@ dsh plugin --profile web add "link:$PWD"
   "projects": [
     {
       "id": "p1",
-      "path": "/home/felix/项目/foo",
+      "path": "~/项目/foo",
       "label": "示例项目",
       "enabled": true,
       "mode": "append",
@@ -124,7 +124,7 @@ dsh plugin --profile web add "link:$PWD"
 
 以下是本机用户维护的开发规则……如有冲突，以后者为准。
 
-适用项目：示例项目（/home/felix/项目/foo）
+适用项目：示例项目（~/项目/foo）
 规则来源：全局规则 + 项目追加规则
 
 ## 全局规则
@@ -169,24 +169,23 @@ npm run check   # 语法检查 + 全部测试
 - 测试：`test/rules.test.mjs`（逻辑）、`test/host.test.mjs`（接口 / 备份 / 409 / 403 / 415 / 软链回退 / 工具）、`test/client.test.mjs`（槽位接线 / 服务晚出现 / 内部件）。
 - CI：`.github/workflows/ci.yml` 在 node 20 / 22 / 24 上跑语法检查 + 测试。
 
-## 代码托管
+## 八、代码托管
 
-本仓遵循「本地 Forgejo 开发 / GitHub 与 Gitee 对外并受理反馈」的三平台分工（规则第 13 条）：
+本仓遵循「本地 Forgejo 开发 / GitHub 与 Gitee 对外并受理反馈」的三平台分工：代码与提交历史以**本地 Forgejo** 为准，两个公开平台只做对外窗口与镜像。
 
 | 平台 | 角色 | 状态 |
 | --- | --- | --- |
-| 本地 Forgejo（私有）<http://127.0.0.1:3000/Felix/dev-rules> | **开发主仓**，代码与历史以它为准 | 已建仓并推送（默认分支 `main`） |
-| GitHub | 对外窗口 + 反馈受理 | **暂不做**（owner 2026-09-20：后续再说） |
-| Gitee | 国内镜像 + 同样受理反馈 | **暂不做**（owner 2026-09-20：后续再说） |
+| 本地 Forgejo（私有，走回环） | **开发主仓**，代码与历史以它为准 | 已建仓并推送（默认分支 `main`） |
+| GitHub <https://github.com/Grant-Felix/dev-rules> | 对外窗口 + 反馈受理 | 已发布（公开，MIT） |
+| Gitee <https://gitee.com/Grant-Felix/dev-rules> | 国内镜像 + 同样受理反馈 | 已发布（由 GitHub 单向同步） |
 
-推送走 `127.0.0.1`（回环），凭据由 `.git/git-credential-forgejo` 提供 —— 该 helper **校验 `host=`**，
-只对 `127.0.0.1` / `localhost` 应答，其它 host 一律静默退出（防止把本机令牌回给别的平台）。
+代码**单向**流动：本地 Forgejo → GitHub → Gitee，禁止把某个平台的提交反向直推到另一个平台（会造成历史分叉与重复改动）。两个平台上的 Issue 与 PR 都一样受理，但同一个问题只在**先提出的那一侧**开正式讨论，另一侧贴链接引导过去，避免两边各说各话。
 
-> **两个仓，一条边界。** 本项目分成两个仓：**本仓只装插件**（开源，MIT）；作者的规则内容、
-> 以及廿一的开发约定清单 / 自检脚本 / 还原备份，都在私有仓 **`felix-dev-rules`**（**闭源**），
-> 本地路径 `~/项目/felix-dev-rules/`。代码与内容在物理上分开，这条边界就不靠约定去守 —— 详见 [`NOTICE.md`](NOTICE.md)。
+推送凭据按平台分开配置：每个 host 各有一个 git credential helper，且都**校验 `host=`**、只对自己那一个平台应答，其它 host 一律静默退出 —— 否则会把 A 平台的令牌回给 B 平台。
 
-## 许可
+> **代码与规则内容分开。** 本仓只装插件（开源，MIT）；作者本人维护的规则内容不在本仓、也不随本仓分发，只存在于作者本机。这条边界由文件位置本身保证，不靠约定去守 —— 详见 [`NOTICE.md`](NOTICE.md)。
+
+## 九、许可
 
 **代码开源、规则内容闭源**：
 
