@@ -26,6 +26,7 @@ DSH（DeepSeek Harness）个人插件：把你自己的一套**项目开发规�
 | 注入预览 | 输入任意目录，看该目录下**真正注入**的文本（含未保存修改、命中项目、是否被截断） |
 | 上限保护 | 单次注入文本上限 12000 字符，超出在行边界截断并附提示，避免吃光提示预算 |
 | `dev_rules` 工具 | action = `list` / `add` / `update` / `remove`，支持 global / project 归属与分组 |
+| 插件更新 | 面板顶部**有更新时才出现**一条细提示，点「更新」即可更新本插件（走插件市场公布的同源更新 API，含进度、失败原因与回滚）；没装插件市场时整块隐藏 |
 | 接口硬化 | 所有接口校验 `Origin` / `Sec-Fetch-Site`（跨站 403），POST 要求 `Content-Type: application/json`（否则 415） |
 
 没有生效规则时注入空串 —— 等于这个插件「隐身」。
@@ -58,7 +59,7 @@ dsh plugin --profile web add link:$PWD
 
 > 为什么客户端改动也要重启：DSH 的 `client-modules` 在**启动时**把每个插件的 client bundle 读进内存（`readFileSync` + 内容哈希当 `rev`），之后只按「已登记的 URL」出字节；文件内容变化要经 HMR watcher 的 `rebuilt(id)` 才会重新登记，而 watcher 只有在源码检出里跑着 `pnpm run dev:web` 时才装得上。本机是安装版部署、没有跑 dev watcher，所以**硬刷新页面拿不到新 bundle**，必须重启一次 profile。
 
-升级：在**插件市场**的「更新」里一键完成（它按 profile 的 lockfile 锁定的提交与远端 HEAD 比对，并自带 git 更新的回滚），或命令行 `dsh plugin --profile web update dsh-dev-rules`（重新解析到分支最新提交）。卸载：`dsh plugin --profile web remove dsh-dev-rules`，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
+升级：**面板顶部在有新版本时会自动出现一条提示**，点「更新」即可（走插件市场公布的同源更新 API；没装插件市场时这条提示不出现）。也可在插件市场的「更新」里做（它按 profile 的 lockfile 锁定的提交与远端 HEAD 比对，并自带 git 更新的回滚），或命令行 `dsh plugin --profile web update dsh-dev-rules`（重新解析到分支最新提交）。卸载：`dsh plugin --profile web remove dsh-dev-rules`，重启。规则文件会留在 `$DSH_HOME/dev-rules.json`。
 
 ## 三、数据
 
@@ -109,7 +110,7 @@ dsh plugin --profile web add link:$PWD
 - 「效果预览」：选一个目录点「查看」，用大白话告诉你：命中了哪个项目、用了几条规则、全局规则有没有被挡掉、一共多少字 / 约多少 token、是否被截断，下面给出实际注入的原文。
 - 顶部「生效中 / 已停用」小胶囊就是总开关（点一下切换），不用去翻设置。
 - 冲突与导入都弹**横幅**并给出明确选择：「载入磁盘版本（放弃我的修改）／用我的修改覆盖」、「替换现有规则／合并进来／算了」。
-- **更多（折叠）**里是低频功能：导出备份（Markdown / JSON）、从备份导入、放弃修改并重新载入、文件位置、使用说明。
+- **更多（折叠）**里是低频功能：插件更新（手动查一次本插件有没有新版本）、导出备份（Markdown / JSON）、从备份导入、放弃修改并重新载入、文件位置、使用说明。
 - 搜索与分组筛选只在规则较多（> 6 条）时才出现，避免一上来就堆控件；但只要筛选条件还在，这行就不会消失 —— 否则规则会被静默藏起来，连清空条件的地方都没有。
 - 面板渲染若抛错，会就地显示错误原文（错误边界），而不是整块空白。
 
