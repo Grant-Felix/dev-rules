@@ -442,6 +442,8 @@ test('client 内部件：短 sha 与更新中按钮的百分比', () => {
 	// npm 来源是语义化版本：一律截断会把 1.2.0-beta.1 截成 1.2.0-b
 	assert.equal(shortVersion('0.4.2'), '0.4.2')
 	assert.equal(shortVersion('1.2.0-beta.1'), '1.2.0-beta.1')
+	// 发布版本改用「年月日」式，不是 commit sha，也不能被截断
+	assert.equal(shortVersion('26.9.21'), '26.9.21')
 	assert.equal(shortVersion('abc'), 'abc', '不足 7 位就不像 sha，原样用')
 	assert.equal(shortVersion(''), '')
 	assert.equal(shortVersion(undefined), '')
