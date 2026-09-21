@@ -8,7 +8,7 @@
  *   4. dev_rules 工具能新增 / 改 / 删规则并落盘，立刻影响注入文本。
  */
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -258,6 +258,37 @@ test('接口：state / workspaces / save / preview / reload 与落盘 + 备份',
 	const reload = await callRoute(ctx, 'POST', '/dev-rules/reload', '{}')
 	assert.equal(reload.payload.meta.revision >= 1, true)
 });
+
+test('保存：并发写不共用临时文件（内容完整、无残留 .tmp）', async (t) => {
+	const home = withHome(t)
+	const ctx = makeCtx()
+	apply(ctx)
+	t.after(() => ctx.disposeAll())
+
+	// 并发提交多份互不相同的文档。临时文件名若只与进程绑定（人人同名），并行写入会
+	// 互相覆盖：后到的 rename 拿到已被搬走的路径 → ENOENT → 500；更糟的是前一次
+	// rename 会把别人正在写的文件搬成正式文件，落盘内容变成两次写入交错的半截 JSON。
+	// 文档做大（每份 ~320KB）让这个时间窗真的重叠。
+	const rulesPerDoc = 80
+	const docs = Array.from({ length: 10 }, (_, index) => ({
+		enabled: true,
+		global: Array.from({ length: rulesPerDoc }, () => ({ title: 'V' + String(index), content: 'x'.repeat(4000) })),
+		projects: [],
+	}))
+	const results = await Promise.all(
+		docs.map((doc) => callRoute(ctx, 'POST', '/dev-rules/save', JSON.stringify({ doc }))),
+	)
+	for (const result of results) assert.equal(result.status, 200)
+
+	// 落盘内容必须来自同一次保存且结构完整：交错写会让 JSON 解析失败或标题混杂
+	const onDisk = JSON.parse(readFileSync(path.join(home, 'dev-rules.json'), 'utf8'))
+	assert.equal(onDisk.global.length, rulesPerDoc)
+	assert.equal(new Set(onDisk.global.map((rule) => rule.title)).size, 1, '不能是两次写入交错的产物')
+	assert.equal(onDisk.global.every((rule) => rule.content.length === 4000), true)
+
+	const residue = readdirSync(home).filter((entry) => entry.endsWith('.tmp'))
+	assert.deepEqual(residue, [], '保存完成或失败后都不该留下临时文件')
+})
 
 test('接口硬化：跨站请求 403、非 JSON 体 415、未知路径 404', async (t) => {
 	withHome(t)
