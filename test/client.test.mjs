@@ -304,6 +304,20 @@ test('client bundle：顶部吸顶条（源码级守卫）', () => {
 	assert.notEqual(background[1].trim(), 'transparent', '底色不能是 transparent')
 })
 
+test('client 内部件：revision 单调性判定（旧响应不许把状态倒回去）', () => {
+	const { registration, require } = loadBundle()
+	const exports = registration.factory(require)
+	const { isNewerRevision } = exports.__internal
+
+	assert.equal(isNewerRevision(5, 4), true)
+	assert.equal(isNewerRevision(4, 4), false, '同一个 revision 不算新状态')
+	// 保存之前发出的轮询请求、响应后到：照收会把刚保存的 doc 与 revision 一起倒回去
+	assert.equal(isNewerRevision(3, 4), false)
+	assert.equal(isNewerRevision(1, 0), true)
+	assert.equal(isNewerRevision(Number.NaN, 4), false)
+	assert.equal(isNewerRevision(undefined, 4), false)
+})
+
 test('client 内部件：token 粗估与导入合并（按 id + 标题/正文去重）', () => {
 	const { registration, require } = loadBundle()
 	const exports = registration.factory(require)
