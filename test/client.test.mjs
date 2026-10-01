@@ -830,3 +830,42 @@ test('client bundle：规则卡两列式网格与「窄栏退单列」（源码�
 	assert.match(shared[1], /var\(--ar-radius\)/)
 	assert.match(shared[1], /var\(--ar-line\)/)
 })
+
+test('client 内部件：换过路由后的过渡回退（只在 404 且旧路由有响应时才切）', () => {
+	const { registration, require } = loadBundle()
+	const { legacyRouteFor } = registration.factory(require).__internal
+
+	// 新路由 404、旧路由答得上来 → 回退（这正是「页面已换新客户端、宿主还没重启」的那一刻）
+	assert.equal(legacyRouteFor(404, 200), '/dev-rules')
+	// 旧路由也 404（路径写错、接口真没了）→ 不回退，别把配置错误伪装成版本差异
+	assert.equal(legacyRouteFor(404, 404), null)
+	// 非 404 的失败（403 跨站 / 500 宿主内部错）照旧原样上报，不换路
+	assert.equal(legacyRouteFor(500, 200), null)
+	assert.equal(legacyRouteFor(403, 200), null)
+})
+
+test('client 内部件：并发下先切换的请求不能害后来的请求拿 404 当结果', async () => {
+	// 这是实测踩到的形状：两个请求同时在飞，甲先回来把路由切到旧路由；乙的重试随后成功 ——
+	// 曾经按「路由已切过」就跳过，乙便拿着自己那份 404 报错，面板一片「读取失败」。
+	const { registration, require } = loadBundle()
+	const { callWithRouteFallback } = registration.factory(require).__internal
+
+	const state = { route: '/agent-rules' };
+	let releaseSlow = null;
+	const doFetch = (url) => {
+		if (url === '/agent-rules/slow') return new Promise((resolve) => { releaseSlow = () => resolve({ status: 404 }); })
+		if (url === '/dev-rules/slow') return Promise.resolve({ status: 200 })
+		if (url === '/agent-rules/fast') return Promise.resolve({ status: 404 })
+		if (url === '/dev-rules/fast') return Promise.resolve({ status: 200 })
+		return Promise.resolve({ status: 500 })
+	}
+
+	const slow = callWithRouteFallback(doFetch, state, '/slow')   // 乙：主请求还挂着
+	const fast = await callWithRouteFallback(doFetch, state, '/fast') // 甲：先回来，把路由切走
+	assert.equal(fast.status, 200)
+	assert.equal(state.route, '/dev-rules', '甲应当记住切换')
+
+	releaseSlow()                                                  // 乙的主请求这时才回 404
+	const response = await slow
+	assert.equal(response.status, 200, '乙必须采用自己那次成功的重试结果，而不是那份 404')
+})

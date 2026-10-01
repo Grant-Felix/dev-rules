@@ -46,7 +46,7 @@ const BANNED = [
 const ALLOWED = [
   { file: 'lib/index.js', token: 'dev-rules', why: 'LEGACY_FILE_NAME：更名前那份数据文件的**迁移来源**，必须写它才能把老用户的规则搬过来' },
   { file: 'lib/index.js', token: 'dsh-dev-rules', why: '同一处的中文注释（说清是从哪个名字迁过来的）' },
-  { file: 'lib/client.js', token: 'dev-rules', why: 'LEGACY_TAB_KIND：更名前已打开的页签在 localStorage 里存的就是这个 kind，留着兼容注册' },
+  { file: 'lib/client.js', token: 'dev-rules', why: '两处过渡兼容：LEGACY_TAB_KIND（更名前已打开的页签持久化的就是这个 kind）与 LEGACY_ROUTE（页面已换新客户端、宿主还没重启时把请求退回去问一次）' },
   { file: 'test/host.test.mjs', token: 'dev-rules', why: '迁移用例自己造一份旧名字的数据文件来验迁移' },
   { file: 'test/client.test.mjs', token: 'dev-rules', why: '断言兼容注册存在、且**不能带 guide**（带了页面列表会多一行）' },
   { file: 'scripts/sandbox.sh', token: 'dsh-dev-rules', why: '沙箱要先摘掉旧包名的依赖，否则 profile 会同时装两份' },
