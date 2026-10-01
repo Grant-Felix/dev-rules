@@ -12,6 +12,10 @@ dev-rules.json.bak
 
 # 隔离沙箱（scripts/sandbox.sh 的 DSH_HOME，是本地环境不是仓库内容）
 .sandbox/
+# 沙箱里 pnpm 无法从全局 store 硬链接，于是在仓库根落一个本地 store
+.pnpm-store/
+# 本地视觉核验留档（无头 Chrome 驱动 + 截图，不属于仓库内容）
+.visual/
 
 # 编辑器与系统
 .DS_Store
