@@ -7,6 +7,8 @@ yarn.lock
 # 本地运行产物
 *.log
 *.tmp
+agent-rules.json
+agent-rules.json.bak
 dev-rules.json
 dev-rules.json.bak
 

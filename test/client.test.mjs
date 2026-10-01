@@ -425,7 +425,7 @@ const SHA_NEW = 'd054f3d1a2b3c4d5e6f708192a3b4c5d6e7f8091'
 const CAPS = { rollback: true, restart: true }
 const NO_RESTART = { rollback: false, restart: false }
 const BEHIND = {
-	name: 'dsh-dev-rules',
+	name: 'dsh-agent-rules',
 	source: 'github',
 	installedVersion: SHA_OLD,
 	latestVersion: SHA_NEW,
@@ -651,7 +651,7 @@ test('client 内部件：从实测响应体里取 package / operation（照契�
 	// 下面三份是照本机 dshmarket（UPDATE-API-v1）实测响应抄下来的形状
 	const status = updateStatusOf({
 		schema: 'dsh-market/update-api/v1',
-		package: { name: 'dsh-dev-rules', source: 'github', installedVersion: SHA_OLD, latestVersion: SHA_NEW, updateAvailable: true, channelSwitch: null },
+		package: { name: 'dsh-agent-rules', source: 'github', installedVersion: SHA_OLD, latestVersion: SHA_NEW, updateAvailable: true, channelSwitch: null },
 	})
 	assert.equal(status.updateAvailable, true)
 	assert.equal(status.installedVersion, SHA_OLD)
@@ -662,7 +662,7 @@ test('client 内部件：从实测响应体里取 package / operation（照契�
 			schema: 'dsh-market/update-api/v1',
 			operationId: '12227-1789986459219-update-1',
 			kind: 'update',
-			packageName: 'dsh-dev-rules',
+			packageName: 'dsh-agent-rules',
 			state: 'running',
 			createdAt: 1,
 			startedAt: 2,
@@ -724,12 +724,12 @@ test('client 内部件：文件路径把 $DSH_HOME 缩成 ~（窄栏里一行放
 	const { registration, require } = loadBundle()
 	const { prettyPath } = registration.factory(require).__internal
 
-	assert.equal(prettyPath('/home/felix/.dsh/dev-rules.json', '/home/felix/.dsh'), '~/dev-rules.json')
-	assert.equal(prettyPath('/home/felix/.dsh/dev-rules.json.bak', '/home/felix/.dsh'), '~/dev-rules.json.bak')
+	assert.equal(prettyPath('/home/felix/.dsh/agent-rules.json', '/home/felix/.dsh'), '~/agent-rules.json')
+	assert.equal(prettyPath('/home/felix/.dsh/agent-rules.json.bak', '/home/felix/.dsh'), '~/agent-rules.json.bak')
 	assert.equal(prettyPath('/home/felix/.dsh', '/home/felix/.dsh'), '~')
 	// 不在 home 下面、或宿主没给 home：原样显示，不做猜测
-	assert.equal(prettyPath('/etc/dev-rules.json', '/home/felix/.dsh'), '/etc/dev-rules.json')
-	assert.equal(prettyPath('/home/felix/.dsh/dev-rules.json', ''), '/home/felix/.dsh/dev-rules.json')
+	assert.equal(prettyPath('/etc/agent-rules.json', '/home/felix/.dsh'), '/etc/agent-rules.json')
+	assert.equal(prettyPath('/home/felix/.dsh/agent-rules.json', ''), '/home/felix/.dsh/agent-rules.json')
 	assert.equal(prettyPath(undefined, '/home/felix/.dsh'), '')
 })
 

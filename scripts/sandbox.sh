@@ -17,8 +17,8 @@
 #   DSH_SANDBOX_PORT    监听端口（默认 3199；传 0 让系统挑）
 #   DSH_SANDBOX_SOURCE  安装来源（默认 link:<仓库>）。想验「使用者装到的到底是什么」，
 #                       就传发布来源，例如：
-#                         DSH_SANDBOX_SOURCE=github:Grant-Felix/dev-rules npm run sandbox
-#                         DSH_SANDBOX_SOURCE=git+https://gitee.com/Grant-Felix/dev-rules.git npm run sandbox
+#                         DSH_SANDBOX_SOURCE=github:Grant-Felix/dsh-agent-rules npm run sandbox
+#                         DSH_SANDBOX_SOURCE=git+https://gitee.com/Grant-Felix/dev-rules.git npm run sandbox  # Gitee 镜像未随更名改动
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,6 +26,11 @@ sandbox_home="${DSH_SANDBOX_HOME:-$repo/.sandbox/home}"
 port="${DSH_SANDBOX_PORT:-3199}"
 source_spec="${DSH_SANDBOX_SOURCE:-link:$repo}"
 profile_dir="$sandbox_home/profiles/web"
+# 包名从清单里读，不在这里再写一份：改名的风险点正是「文档/脚本里还有一处旧名」。
+pkg_name="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/package.json" | head -1)"
+# 更名前用的包名：沙箱里如果还装着它，装新名字之前要先摘掉，否则 profile 会同时装两份
+legacy_name="dsh-dev-rules"
+[ -n "$pkg_name" ] || { echo "读不出 package.json 的 name。" >&2; exit 1; }
 
 command -v dsh >/dev/null 2>&1 || {
   echo "找不到 dsh：先装 DeepSeek Harness CLI（npm install -g @deepseek-ai/dsh）。" >&2
@@ -48,9 +53,14 @@ export DSH_HOME="$sandbox_home"
 # 组装绿了，却根本没验过本插件。
 ensure_profile() {
   local recorded
-  # `|| true`：package.json 里没有这条时 grep 会以非零退出，配上 set -e/pipefail
-  # 会把整个脚本掐掉 —— 而「还没装过」恰恰是最正常的第一次运行。
-  recorded="$(grep -o '"dsh-dev-rules": "[^"]*"' "$profile_dir/package.json" 2>/dev/null | head -1 | sed 's/.*: "//; s/"$//' || true)"
+  # 用 node 读依赖表，而不是对着 package.json 正则：包名进了变量之后，引号/转义
+  # 在 shell 里很容易写错，而这里判错的代价是「以为装好了，其实装的是旧那份」。
+  recorded="$(PKG="$pkg_name" DIR="$profile_dir" node -e "
+    try {
+      const pkg = require(process.env.DIR + '/package.json')
+      process.stdout.write(String((pkg.dependencies ?? {})[process.env.PKG] ?? ''))
+    } catch {}
+  " 2>/dev/null || true)"
   if [ "$recorded" = "$source_spec" ]; then
     return 0
   fi
@@ -59,11 +69,17 @@ ensure_profile() {
   else
     echo "在沙箱初始化 profile 并安装 $source_spec"
   fi
+  # 更名（dsh-dev-rules → dsh-agent-rules）之后，旧名字那条依赖会让 profile 同时装两份，
+  # 而 bundle 阵容里还挂着旧包名。装新名字之前先把它摘掉。
+  if grep -qF "\"$legacy_name\"" "$profile_dir/package.json" 2>/dev/null; then
+    echo "沙箱里还装着更名前的 $legacy_name → 先移除"
+    dsh plugin --profile web remove "$legacy_name" || true
+  fi
   dsh plugin --profile web add "$source_spec"
   # 自动登记 bundle 是 dsh plugin 的职责，但「装上了却没进阵容」会让后面全部失真，
   # 所以这里显式确认一次，不靠假设。
-  grep -q '"dsh-dev-rules"' "$profile_dir/package.json" || {
-    echo "安装后沙箱 profile 里仍没有 dsh-dev-rules，中止。" >&2
+  grep -qF "\"$pkg_name\"" "$profile_dir/package.json" || {
+    echo "安装后沙箱 profile 里仍没有 $pkg_name，中止。" >&2
     exit 1
   }
 }
@@ -78,7 +94,7 @@ cmd="${1:-boot}"
 # 仓库里的用例只保证「检出里的文件」一致；这里保证**沙箱里装的那一份**一致 ——
 # 来源换成 github: / git+… 时，两者未必是同一份代码。
 verify_client_id() {
-  local dir="$sandbox_home/profiles/web/node_modules/dsh-dev-rules"
+  local dir="$sandbox_home/profiles/web/node_modules/$pkg_name"
   [ -d "$dir" ] || { echo "沙箱里找不到已安装的插件目录：$dir" >&2; exit 1; }
   PLUGIN_DIR="$dir" node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs'
@@ -129,7 +145,7 @@ case "$cmd" in
   boot)
     ensure_profile
     echo "隔离实例：DSH_HOME=$sandbox_home  端口=$port  来源=$source_spec"
-    echo "（它读沙箱自己的 dev-rules.json，不会碰 ~/.dsh/dev-rules.json）"
+    echo "（它读沙箱自己的 agent-rules.json，不会碰 ~/.dsh/agent-rules.json）"
     # 改完代码重跑这一条即可；--no-open 免得每次弹浏览器
     exec dsh --profile web --port "$port" --no-open
     ;;

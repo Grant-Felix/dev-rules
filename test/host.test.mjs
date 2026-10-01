@@ -5,7 +5,8 @@
  *      不会被 DSH 的 `{{…}}` 插值扫到）；
  *   2. /dev-rules/* 接口能读 / 存 / 预览 / 列工作区，并挡住跨站与错类型；
  *   3. 保存带 revision，过期返回 409；保存前留 .bak 备份；
- *   4. dev_rules 工具能新增 / 改 / 删规则并落盘，立刻影响注入文本。
+ *   4. agent_rules 工具能新增 / 改 / 删规则并落盘，立刻影响注入文本；
+ *   5. 更名迁移：旧数据文件 agent-rules.json 会被复制到 agent-rules.json。
  */
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
@@ -104,7 +105,7 @@ async function callRoute(ctx, method, url, body, headers) {
 }
 
 function withHome(t) {
-	const home = mkdtempSync(path.join(os.tmpdir(), 'dev-rules-'))
+	const home = mkdtempSync(path.join(os.tmpdir(), 'agent-rules-'))
 	const previous = process.env.DSH_HOME
 	process.env.DSH_HOME = home
 	t.after(() => {
@@ -124,7 +125,7 @@ const bodyProvider = (ctx) => {
 const cwdAssembly = (cwd) => ({ agent: { session: { header: { cwd } } } })
 
 test('插件身份：name / inject 与约定一致', () => {
-	assert.equal(name, 'dev-rules')
+	assert.equal(name, 'agent-rules')
 	assert.deepEqual(inject, ['webServer', 'systemPrompt', 'tools'])
 })
 
@@ -143,7 +144,7 @@ test('注入：section 是常量引用，正文由 dev_rules_body 变量提供',
 	const provider = bodyProvider(ctx)
 	assert.equal(provider(cwdAssembly('/tmp/whatever')), '')
 
-	const tool = ctx.registeredTools.find((entry) => entry.name === 'dev_rules')
+	const tool = ctx.registeredTools.find((entry) => entry.name === 'agent_rules')
 	await tool.execute({ action: 'add', scope: 'global', title: '提交前跑测试', content: 'npm test 必须绿' })
 	assert.match(provider(cwdAssembly('/tmp/other')), /\*\*提交前跑测试\*\*/)
 
@@ -171,7 +172,7 @@ test('注入：软链工作目录经 realpath 回退仍能命中项目规则', a
 	apply(ctx)
 	t.after(() => ctx.disposeAll())
 	const provider = bodyProvider(ctx)
-	const tool = ctx.registeredTools.find((entry) => entry.name === 'dev_rules')
+	const tool = ctx.registeredTools.find((entry) => entry.name === 'agent_rules')
 
 	const realDir = mkdtempSync(path.join(os.tmpdir(), 'dev-rules-real-'))
 	const linkDir = path.join(mkdtempSync(path.join(os.tmpdir(), 'dev-rules-link-')), 'link')
@@ -197,8 +198,8 @@ test('接口：state / workspaces / save / preview / reload 与落盘 + 备份',
 
 	const initial = await callRoute(ctx, 'GET', '/dev-rules/state')
 	assert.equal(initial.status, 200)
-	assert.equal(initial.payload.meta.file, path.join(home, 'dev-rules.json'))
-	assert.equal(initial.payload.meta.backupFile, path.join(home, 'dev-rules.json.bak'))
+	assert.equal(initial.payload.meta.file, path.join(home, 'agent-rules.json'))
+	assert.equal(initial.payload.meta.backupFile, path.join(home, 'agent-rules.json.bak'))
 	// 逐条上限随 /state 下发，面板据此设 maxLength：与 rules.js 的常量必须是同一份
 	assert.deepEqual(initial.payload.meta.limits, {
 		title: MAX_TITLE,
@@ -255,9 +256,9 @@ test('接口：state / workspaces / save / preview / reload 与落盘 + 备份',
 		}),
 	)
 	assert.equal(second.payload.ok, true)
-	const backup = JSON.parse(readFileSync(path.join(home, 'dev-rules.json.bak'), 'utf8'))
+	const backup = JSON.parse(readFileSync(path.join(home, 'agent-rules.json.bak'), 'utf8'))
 	assert.equal(backup.global[0].title, '先读再改')
-	const onDisk = JSON.parse(readFileSync(path.join(home, 'dev-rules.json'), 'utf8'))
+	const onDisk = JSON.parse(readFileSync(path.join(home, 'agent-rules.json'), 'utf8'))
 	assert.equal(onDisk.global[0].title, 'V2')
 
 	// 用过期 revision 保存：409，不覆盖
@@ -269,7 +270,7 @@ test('接口：state / workspaces / save / preview / reload 与落盘 + 备份',
 	)
 	assert.equal(stale.status, 409)
 	assert.equal(stale.payload.conflict, true)
-	assert.equal(JSON.parse(readFileSync(path.join(home, 'dev-rules.json'), 'utf8')).global[0].title, 'V2')
+	assert.equal(JSON.parse(readFileSync(path.join(home, 'agent-rules.json'), 'utf8')).global[0].title, 'V2')
 
 	const reload = await callRoute(ctx, 'POST', '/dev-rules/reload', '{}')
 	assert.equal(reload.payload.meta.revision >= 1, true)
@@ -297,7 +298,7 @@ test('保存：并发写不共用临时文件（内容完整、无残留 .tmp）
 	for (const result of results) assert.equal(result.status, 200)
 
 	// 落盘内容必须来自同一次保存且结构完整：交错写会让 JSON 解析失败或标题混杂
-	const onDisk = JSON.parse(readFileSync(path.join(home, 'dev-rules.json'), 'utf8'))
+	const onDisk = JSON.parse(readFileSync(path.join(home, 'agent-rules.json'), 'utf8'))
 	assert.equal(onDisk.global.length, rulesPerDoc)
 	assert.equal(new Set(onDisk.global.map((rule) => rule.title)).size, 1, '不能是两次写入交错的产物')
 	assert.equal(onDisk.global.every((rule) => rule.content.length === 4000), true)
@@ -335,12 +336,12 @@ test('接口硬化：跨站请求 403、非 JSON 体 415、未知路径 404', as
 	assert.equal(missing.status, 404)
 });
 
-test('dev_rules 工具：list / update / remove 与错误分支', async (t) => {
+test('agent_rules 工具：list / update / remove 与错误分支', async (t) => {
 	withHome(t)
 	const ctx = makeCtx()
 	apply(ctx)
 	t.after(() => ctx.disposeAll())
-	const tool = ctx.registeredTools.find((entry) => entry.name === 'dev_rules')
+	const tool = ctx.registeredTools.find((entry) => entry.name === 'agent_rules')
 
 	assert.equal((await tool.execute({ action: 'add' })).ok, false)
 
@@ -376,10 +377,10 @@ test('规则文件被外部改动：监听/轮询之外还有 reload 接口兜�
 
 	// 模拟外部写入（绕过插件 API），再调 reload 让它生效
 	const { writeFileSync } = await import('node:fs')
-	writeFileSync(path.join(home, 'dev-rules.json'), JSON.stringify({ global: [{ title: '外部规则', content: 'x' }] }), 'utf8')
+	writeFileSync(path.join(home, 'agent-rules.json'), JSON.stringify({ global: [{ title: '外部规则', content: 'x' }] }), 'utf8')
 	const reload = await callRoute(ctx, 'POST', '/dev-rules/reload', '{}')
 	assert.equal(reload.payload.doc.global[0].title, '外部规则')
-	assert.equal(existsSync(path.join(home, 'dev-rules.json')), true)
+	assert.equal(existsSync(path.join(home, 'agent-rules.json')), true)
 })
 
 test('保存：多字节字符被分段切开也要原样落盘（逐块解码，不许出现替换字符）', async (t) => {
@@ -407,7 +408,7 @@ test('保存：多字节字符被分段切开也要原样落盘（逐块解码�
 
 	const res = await callRoute(ctx, 'POST', '/dev-rules/save', chunks)
 	assert.equal(res.status, 200)
-	const onDisk = JSON.parse(readFileSync(path.join(home, 'dev-rules.json'), 'utf8'))
+	const onDisk = JSON.parse(readFileSync(path.join(home, 'agent-rules.json'), 'utf8'))
 	assert.equal(onDisk.global[0].content, content)
 	assert.equal(onDisk.global[0].content.includes('\uFFFD'), false, '不该出现替换字符')
 	assert.equal(onDisk.global[0].title, '标题', '同一份体里的其它字段也不该被波及')
@@ -434,7 +435,7 @@ test('保存：自己的写盘事件不推高 revision（否则「保存后再�
 
 	// 反向确认监听确实在工作（否则上面那两条只是「监听没跑」的假绿灯）：
 	// 外部真改了内容，revision 必须前进。
-	writeFileSync(path.join(home, 'dev-rules.json'), JSON.stringify({ ...doc, global: [{ id: 'g1', title: 'B', content: 'bbb' }] }), 'utf8')
+	writeFileSync(path.join(home, 'agent-rules.json'), JSON.stringify({ ...doc, global: [{ id: 'g1', title: 'B', content: 'bbb' }] }), 'utf8')
 	await new Promise((resolve) => setTimeout(resolve, 700))
 	const changed = await callRoute(ctx, 'GET', '/dev-rules/state')
 	assert.equal(changed.payload.meta.revision > revision, true, '外部改动必须让 revision 前进')
@@ -454,4 +455,39 @@ test('接口硬化：畸形 JSON 体是 400（客户端错误不该报成 500）
 	// 合法 JSON、但不是对象：也是 400
 	const array = await callRoute(ctx, 'POST', '/dev-rules/save', '[1,2,3]')
 	assert.equal(array.status, 400)
+})
+
+test('更名迁移：旧数据文件被复制到新名字下，原文件保留', async (t) => {
+	const home = withHome(t)
+	const legacy = path.join(home, 'dev-rules.json')
+	const fresh = path.join(home, 'agent-rules.json')
+	const legacyDoc = { version: 1, enabled: true, global: [{ id: 'g1', title: '旧名下的规则', content: 'x' }], projects: [] }
+	writeFileSync(legacy, JSON.stringify(legacyDoc), 'utf8')
+
+	const ctx = makeCtx()
+	apply(ctx)
+	t.after(() => ctx.disposeAll())
+
+	const state = await callRoute(ctx, 'GET', '/dev-rules/state')
+	// 关键：不是「从旧文件读一次就算了」，而是真的复制过去 —— 否则第一次保存会以新文件为基准
+	// 写出一个只有新改动的文档，用户攒的规则会被留在旧文件里没人再看
+	assert.equal(state.payload.meta.file, fresh)
+	assert.equal(state.payload.meta.migratedFrom, legacy)
+	assert.equal(existsSync(fresh), true, '新名字下的文件应被创建')
+	assert.equal(existsSync(legacy), true, '原文件必须保留（回退到旧版本插件时还要读它）')
+	assert.equal(readFileSync(fresh, 'utf8'), readFileSync(legacy, 'utf8'))
+	assert.equal(state.payload.doc.global[0].title, '旧名下的规则')
+
+	// 保存走的是新文件，备份也挂在新名字下
+	const saved = await callRoute(ctx, 'POST', '/dev-rules/save', JSON.stringify({ doc: state.payload.doc, revision: state.payload.meta.revision }))
+	assert.equal(saved.status, 200)
+	assert.equal(existsSync(path.join(home, 'agent-rules.json.bak')), true)
+
+	// 新文件已经在时不重复迁移（也不会声称迁移过）
+	const again = makeCtx()
+	apply(again)
+	t.after(() => again.disposeAll())
+	const second = await callRoute(again, 'GET', '/dev-rules/state')
+	assert.equal(second.payload.meta.migratedFrom, '')
+	assert.equal(second.payload.doc.global[0].title, '旧名下的规则')
 })
