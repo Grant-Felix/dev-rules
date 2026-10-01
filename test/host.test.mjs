@@ -8,7 +8,7 @@
  *   4. dev_rules 工具能新增 / 改 / 删规则并落盘，立刻影响注入文本。
  */
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -70,7 +70,14 @@ function makeRequest(method, url, body, headers = {}) {
 		url,
 		headers: merged,
 		async *[Symbol.asyncIterator]() {
-			if (body !== undefined) yield body
+			if (body === undefined) return
+			// 数组＝按块给（可选 Buffer）：真实 socket 会从多字节字符中间切开，
+			// 单块字符串的桩天然绕过这一类解码问题。
+			if (Array.isArray(body)) {
+				for (const chunk of body) yield chunk
+				return
+			}
+			yield body
 		},
 	}
 }
@@ -373,4 +380,78 @@ test('规则文件被外部改动：监听/轮询之外还有 reload 接口兜�
 	const reload = await callRoute(ctx, 'POST', '/dev-rules/reload', '{}')
 	assert.equal(reload.payload.doc.global[0].title, '外部规则')
 	assert.equal(existsSync(path.join(home, 'dev-rules.json')), true)
+})
+
+test('保存：多字节字符被分段切开也要原样落盘（逐块解码，不许出现替换字符）', async (t) => {
+	const home = withHome(t)
+	const ctx = makeCtx()
+	apply(ctx)
+	t.after(() => ctx.disposeAll())
+
+	const content = '中文规则正文：捕获异常后要么记录、要么转成用户能看懂的提示。'.repeat(20)
+	const doc = { version: 1, enabled: true, global: [{ id: 'g1', title: '标题', content }], projects: [] }
+	const body = Buffer.from(JSON.stringify({ doc }), 'utf8')
+	// 切点必须落在**正文**某个多字节字符内部（续字节 0x80–0xBF 上）：切在标题里也能让
+	// JSON 解析通过，却正好绕开要验的那个字段 —— 这条用例第一版就是这么白写的。
+	const contentAt = body.indexOf(Buffer.from(content, 'utf8'))
+	assert.ok(contentAt > 0, '正文应能在请求体里定位到')
+	let cut = -1
+	for (let index = contentAt + 1; index < body.length; index += 1) {
+		if (body[index] >= 0x80 && body[index] <= 0xbf) {
+			cut = index
+			break
+		}
+	}
+	assert.ok(cut > contentAt, '中文正文里应能找到一个 UTF-8 续字节作为切点')
+	const chunks = [body.subarray(0, cut), body.subarray(cut, cut + 1), body.subarray(cut + 1)]
+
+	const res = await callRoute(ctx, 'POST', '/dev-rules/save', chunks)
+	assert.equal(res.status, 200)
+	const onDisk = JSON.parse(readFileSync(path.join(home, 'dev-rules.json'), 'utf8'))
+	assert.equal(onDisk.global[0].content, content)
+	assert.equal(onDisk.global[0].content.includes('\uFFFD'), false, '不该出现替换字符')
+	assert.equal(onDisk.global[0].title, '标题', '同一份体里的其它字段也不该被波及')
+})
+
+test('保存：自己的写盘事件不推高 revision（否则「保存后再保存」必假报 409）', async (t) => {
+	const home = withHome(t)
+	const ctx = makeCtx()
+	apply(ctx)
+	t.after(() => ctx.disposeAll())
+
+	const doc = { version: 1, enabled: true, global: [{ id: 'g1', title: 'A', content: 'aaa' }], projects: [] }
+	const first = await callRoute(ctx, 'POST', '/dev-rules/save', JSON.stringify({ doc }))
+	assert.equal(first.status, 200)
+	const revision = first.payload.meta.revision
+
+	// 目录监听（去抖 250ms）会把插件自己那次 rename 也汇报一次；内容没变，revision 不能动
+	await new Promise((resolve) => setTimeout(resolve, 700))
+	const state = await callRoute(ctx, 'GET', '/dev-rules/state')
+	assert.equal(state.payload.meta.revision, revision, '磁盘内容没变，revision 不该前进')
+
+	const again = await callRoute(ctx, 'POST', '/dev-rules/save', JSON.stringify({ doc, revision }))
+	assert.equal(again.status, 200, '拿着上一次保存返回的 revision 再存一次，不该被判成冲突')
+
+	// 反向确认监听确实在工作（否则上面那两条只是「监听没跑」的假绿灯）：
+	// 外部真改了内容，revision 必须前进。
+	writeFileSync(path.join(home, 'dev-rules.json'), JSON.stringify({ ...doc, global: [{ id: 'g1', title: 'B', content: 'bbb' }] }), 'utf8')
+	await new Promise((resolve) => setTimeout(resolve, 700))
+	const changed = await callRoute(ctx, 'GET', '/dev-rules/state')
+	assert.equal(changed.payload.meta.revision > revision, true, '外部改动必须让 revision 前进')
+	assert.equal(changed.payload.doc.global[0].title, 'B')
+})
+
+test('接口硬化：畸形 JSON 体是 400（客户端错误不该报成 500）', async (t) => {
+	withHome(t)
+	const ctx = makeCtx()
+	apply(ctx)
+	t.after(() => ctx.disposeAll())
+
+	const broken = await callRoute(ctx, 'POST', '/dev-rules/save', '{oops')
+	assert.equal(broken.status, 400)
+	assert.match(broken.payload.error, /JSON/)
+
+	// 合法 JSON、但不是对象：也是 400
+	const array = await callRoute(ctx, 'POST', '/dev-rules/save', '[1,2,3]')
+	assert.equal(array.status, 400)
 })
