@@ -124,23 +124,32 @@ test('renderRules：无生效规则就返回空串（等于不注入）', () => 
 	assert.equal(renderRules(overrideEmpty, '/tmp/x'), '')
 })
 
-test('renderRules：文本包含全局与项目规则、标注来源', () => {
+test('renderRules：两级标题 —— 第一级是全局 / 哪个项目，第二级才是用户分组', () => {
 	const doc = sanitizeDoc({
-		global: [{ title: '全局规矩', content: '第一行\n第二行' }],
-		projects: [{ path: '/tmp/proj', label: '示例项目', rules: [{ title: '项目规矩', content: '只管本项目' }] }],
+		global: [
+			{ title: '全局规矩', content: '第一行\n第二行', group: '通用' },
+			{ title: '未分组全局', content: 'x' },
+		],
+		projects: [{ path: '/tmp/proj', label: '示例项目', rules: [{ title: '项目规矩', content: '只管本项目', group: '本项目组' }] }],
 	})
 	const text = renderRules(doc, '/tmp/proj/src')
 	assert.match(text, /# 项目开发规则/)
 	assert.match(text, /## 全局规则/)
-	assert.match(text, /## 项目规则/)
-	assert.match(text, /\*\*全局规矩\*\*/)
-	assert.match(text, /\*\*项目规矩\*\*/)
-	assert.match(text, /适用项目：示例项目/)
+	// 第一级写具体项目名（别名 + 路径）；不再有单独的「适用项目 / 规则来源」两行
+	assert.match(text, /## 项目：示例项目（\/tmp\/proj）/)
+	assert.doesNotMatch(text, /适用项目：/)
+	assert.doesNotMatch(text, /规则来源：/)
+	// 第二级是用户分组；编号跨两级连续
+	assert.match(text, /### 通用\n1\. \*\*全局规矩\*\*/)
+	assert.match(text, /### 本项目组\n3\. \*\*项目规矩\*\*/)
 	assert.match(text, /第二行/)
-	// 未命中项目时不出现项目段落
+	// 未命中项目时不出现任何项目段落，并明确说明只剩全局规则
 	const outside = renderRules(doc, '/tmp/none')
-	assert.doesNotMatch(outside, /## 项目规则/)
+	assert.doesNotMatch(outside, /## 项目：/)
 	assert.match(outside, /当前目录未匹配到项目规则集/)
+	// 没有别名时标题只写路径
+	const bare = sanitizeDoc({ global: [], projects: [{ path: '/tmp/bare', rules: [{ title: 'R', content: 'r' }] }] })
+	assert.match(renderRules(bare, '/tmp/bare'), /## 项目：\/tmp\/bare/)
 })
 
 test('renderRules：超长文本在上限处截断并附提示', () => {
@@ -190,7 +199,10 @@ test('覆盖模式：被挡掉的全局规则会明确告知', () => {
 		projects: [{ path: '/tmp/p', mode: 'override', rules: [{ title: 'P', content: 'p' }] }],
 	})
 	const text = renderRules(doc, '/tmp/p', { limit: Number.POSITIVE_INFINITY })
-	assert.match(text, /2 条全局规则在本项目内不生效/)
+	// 覆盖模式下「## 全局规则」那一段整个不出现，损失的信息由项目标题下这句话补回来
+	assert.doesNotMatch(text, /## 全局规则/)
+	assert.match(text, /## 项目：\/tmp\/p/)
+	assert.match(text, /本项目为覆盖模式：全局规则（2 条）在本项目内不生效/)
 	assert.match(text, /\*\*P\*\*/)
 	assert.doesNotMatch(text, /\*\*G1\*\*/)
 	assert.equal(effectiveRules(doc, '/tmp/p').suppressedGlobalRules.length, 2)
