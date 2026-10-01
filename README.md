@@ -130,7 +130,7 @@ dsh plugin --profile web add link:$PWD
 
 ## 五、注入形态
 
-系统提示 section 名 `plugin:dev-rules`（order `100`，紧跟 persona 之后、工具说明之前），正文是**常量** `{{dev_rules_body}}`；真正的规则文本由同名**提示变量**提供。
+系统提示 section 名 `plugin:agent-rules`（order `100`，紧跟 persona 之后、工具说明之前），正文是**常量** `{{agent_rules_body}}`；真正的规则文本由同名**提示变量**提供。
 
 > 为什么要绕一道变量：DSH 会对 section 正文做严格的 `{{变量}}` 插值，遇到未知 / 畸形引用会直接抛错，而这一步发生在插件回调之外——用户规则里的 `{{placeholder}}` 会把整个模型步打挂。变量值不会被二次扫描，所以用户写什么都不会破坏提示组装。
 
@@ -160,24 +160,34 @@ dsh plugin --profile web add link:$PWD
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| GET | `/dev-rules/state` | 读当前文档 + 元信息（文件、备份、revision、规模、错误） |
-| GET | `/dev-rules/workspaces` | 项目路径下拉的数据源（工作区注册表 + 活动会话目录） |
-| POST | `/dev-rules/save` | `{ doc, revision }` 保存；revision 过期 → **409** + 当前文档 |
-| POST | `/dev-rules/reload` | 从磁盘重新读取 |
-| POST | `/dev-rules/preview` | `{ doc?, path }` 渲染注入文本 + 字符 / token / 逐条体积 |
-| POST | `/dev-rules/export` | `{ doc }` → Markdown 与 JSON 文本 |
-| POST | `/dev-rules/import` | `{ text }` → 解析 Markdown 或 JSON 得到文档 |
+| GET | `/agent-rules/state` | 读当前文档 + 元信息（文件、备份、revision、规模、错误） |
+| GET | `/agent-rules/workspaces` | 项目路径下拉的数据源（工作区注册表 + 活动会话目录） |
+| POST | `/agent-rules/save` | `{ doc, revision }` 保存；revision 过期 → **409** + 当前文档 |
+| POST | `/agent-rules/reload` | 从磁盘重新读取 |
+| POST | `/agent-rules/preview` | `{ doc?, path }` 渲染注入文本 + 字符 / token / 逐条体积 |
+| POST | `/agent-rules/export` | `{ doc }` → Markdown 与 JSON 文本 |
+| POST | `/agent-rules/import` | `{ text }` → 解析 Markdown 或 JSON 得到文档 |
 
-排障示例：`curl -s 127.0.0.1:3080/dev-rules/state | head -c 400`
+排障示例：`curl -s 127.0.0.1:3080/agent-rules/state | head -c 400`
 
 安全边界：以上接口只接受**同源**请求（跨站 `Origin` / `Sec-Fetch-Site` 直接 403），POST 必须 `Content-Type: application/json`。但同机的其它本地进程仍可无凭据访问（DSH 的 webServer 不对插件路由做登录鉴权）——规则内容会进模型提示，别把不能外发的东西写进去。
 
 ## 七、开发
 
 ```sh
-node --test     # 51 个用例
-npm run check   # 语法检查 + 全部测试
+node --test              # 53 个用例
+npm run check            # 语法检查 + 身份自检 + 全部测试
+npm run check:identity   # 只跑身份自检
 ```
+
+**名字只有一处出处（`package.json` 的 `name`），其余标识都由它派生**（slug = 包名去掉 `dsh-`）。`scripts/check-identity.mjs` 会把这几处对一遍：cordis patch 的 `name`、客户端 `__ModuleLoader__.load({ id })`、插件市场认的 `PACKAGE_NAME`、页签 `TAB_IMPL_ID`、路由 `/agent-rules`、section `plugin:agent-rules`、提示变量 `agent_rules_body`、数据文件 `agent-rules.json`、页签 kind —— 它们必须一致。客户端注册 id 与包名不一致时，界面启动直接报「Failed to load plugins」，而宿主接口一切正常，**只 curl 接口的隔离自检根本抓不到这种错**（这个坑踩过一次，见 `test/client.test.mjs` 里那条按包名对齐的用例）。
+
+同一个脚本还守住两件容易被「全局替换」误伤的事：
+
+- **更名前（`dsh-dev-rules`）的旧名字不许再出现在代码与配置里**。允许留下的例外逐条写在脚本的 `ALLOWED` 里 —— 目前 11 条，每条都要说明为什么可以不改（数据文件迁移的来源名、页签 kind 的兼容注册、Gitee 镜像地址……）。新增一条等于承认多欠了一笔账。
+- **Gitee 镜像地址必须仍是 `dev-rules`**：镜像没随更名改动，而「把文档里所有旧名字换成新名字」这种操作会顺手把它改掉 —— 那是文档里国内用户的安装路径，本地测试全绿也发现不了。写这条守卫时我自己就误伤了一次。
+
+于是**改名＝三步**：改 `package.json` 的 `name` → 改两个 `lib` 里 `LEGACY_*` 那几行说明 → 跑 `npm run check:identity` 看还差哪里。
 
 **改完先在隔离沙箱里验，别拿日常在用的那个 profile 试。** 宿主半体是在 profile 启动时加载的：一个有问题的改动足以让整个 DSH 起不来，那时你连界面都进不去，只能去终端里拆插件。
 
@@ -194,7 +204,7 @@ DSH_SANDBOX_SOURCE=git+https://gitee.com/Grant-Felix/dev-rules.git npm run sandb
 沙箱有独立的 `DSH_HOME`，所以它读写的是自己的 `agent-rules.json`，**不会碰你的真实规则文件**；脚本还会拒绝把沙箱 home 指到真实 home。默认端口可用 `DSH_SANDBOX_PORT` 改。
 
 - `lib/rules.js` 纯逻辑（规范化 / 路径匹配 / 生效规则 / 渲染 / 分组 / token 估算 / Markdown 往返），宿主、面板与测试共用；路径匹配的 win32 分支通过 platform 参数可测。
-- `lib/index.js` 宿主半体：存储、提示变量注入、`/dev-rules/*` 接口、`agent_rules` 工具。
+- `lib/index.js` 宿主半体：存储、提示变量注入、`/agent-rules/*` 接口、`agent_rules` 工具。
 - `lib/client.js` 浏览器半体：手写的 `window.__ModuleLoader__.load({ id, factory })` bundle，只依赖 `react`，不需要打包器；纯函数内部件（token 估算 / 导入合并 / 更新提示判定）通过 `exports.__internal` 暴露给测试。
 - `scripts/sandbox.sh`：上面那套隔离环境的实现（独立 `DSH_HOME` + 独立端口 + 安全闸）。
 - 测试：`test/rules.test.mjs`（逻辑 / 两级标题渲染）、`test/host.test.mjs`（接口 / 备份 / 409 / 403 / 415 / 400 / 软链回退 / 工具 / 多字节请求体跨块解码 / revision 不被自己的写盘事件推高）、`test/client.test.mjs`（槽位接线 / 服务晚出现 / 内部件 / 两列网格与卡片统一的源码级守卫）。

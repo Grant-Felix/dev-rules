@@ -8,7 +8,7 @@
     "dsh",
     "dsh-plugin",
     "rules",
-    "dev-rules",
+    "agent-rules",
     "prompt",
     "web"
   ],
@@ -27,9 +27,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Grant-Felix/dev-rules.git"
+    "url": "git+https://github.com/Grant-Felix/dsh-agent-rules.git"
   },
-  "homepage": "https://github.com/Grant-Felix/dev-rules#readme",
+  "homepage": "https://github.com/Grant-Felix/dsh-agent-rules#readme",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -43,7 +43,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check lib/index.js && node --check lib/rules.js && node --check lib/client.js && node --test",
+    "check": "node --check lib/index.js && node --check lib/rules.js && node --check lib/client.js && node scripts/check-identity.mjs && node --test",
+    "check:identity": "node scripts/check-identity.mjs",
     "sandbox": "bash scripts/sandbox.sh boot",
     "sandbox:check": "bash scripts/sandbox.sh check",
     "sandbox:clean": "bash scripts/sandbox.sh clean"

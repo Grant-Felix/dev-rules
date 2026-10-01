@@ -151,21 +151,30 @@ test('client bundle：按右侧栏契约注册 tab 类型与 tab 体，并可整
 	}
 	exports.apply(ctx)
 
-	// 1) tab 类型 + guide 行（右侧栏页面列表里的一行）
-	assert.equal(tabTypes.length, 1)
-	const type = tabTypes[0]
-	assert.equal(type.id, 'dev-rules:panel')
-	assert.equal(type.kind, 'dev-rules')
+	// 1) tab 类型 + guide 行（右侧栏页面列表里的一行）。
+	//    两份注册：当前 kind 一份，更名前的 kind 一份（后者只为让升级前已开着的页签不变成孤儿）。
+	assert.equal(tabTypes.length, 2)
+	const type = tabTypes.find((entry) => entry.kind === 'agent-rules')
+	assert.equal(type.id, 'dsh-agent-rules')
 	assert.equal(type.priority, 'extension')
 	assert.equal(type.title(), '开发规则')
 	assert.equal(type.guide.length, 1)
 	assert.equal(type.guide[0].title(), '开发规则')
 	assert.equal(typeof type.guide[0].description(), 'string')
 
-	// 2) tab 体：key 必须与 tab 类型的实现 id 一致
-	assert.equal(registrations.length, 1)
-	assert.equal(registrations[0].name, 'sidebar.right.pane.tab')
-	assert.equal(registrations[0].key, 'dev-rules:panel')
+	// 兼容注册**必须没有 guide**：页面列表的条目由 guide 贡献，带了就会多出一行「开发规则」
+	const legacy = tabTypes.find((entry) => entry.kind === 'dev-rules')
+	assert.ok(legacy !== undefined, '应为更名前的 kind 留一份兼容注册')
+	assert.equal(legacy.id, 'dsh-agent-rules:legacy-kind', 'id 不能与当前注册撞（同一 id 二次注册会抛错）')
+	assert.equal(legacy.guide, undefined, '兼容注册不能往页面列表里再加一行')
+
+	// 2) tab 体：key 必须与各自 tab 类型的实现 id 一致（正文按 id 挂载）
+	assert.equal(registrations.length, 2)
+	assert.deepEqual(
+		registrations.map((entry) => entry.key).sort(),
+		['dsh-agent-rules', 'dsh-agent-rules:legacy-kind'],
+	)
+	assert.equal(registrations.every((entry) => entry.name === 'sidebar.right.pane.tab'), true)
 
 	// 3) 左侧栏不再占用 main / sidebar.panellist
 	assert.equal(registrations.some((entry) => entry.name === 'main'), false)
@@ -303,9 +312,9 @@ test('client bundle：顶部吸顶条（源码级守卫）', () => {
 	// 这条守卫防的是「有人把 position: sticky 或底色删掉」—— README 两处都写了
 	// 顶部吸顶条，而面板正是靠它保证长列表滚下去后主动作还在。
 	const source = readFileSync(bundlePath, 'utf8')
-	const block = /\.dr_top\s*\{([^}]*)\}/.exec(source)
-	assert.ok(block !== null, '应存在 .dr_top 样式块')
-	assert.match(block[1], /position:\s*sticky/, '.dr_top 必须吸顶')
+	const block = /\.ar_top\s*\{([^}]*)\}/.exec(source)
+	assert.ok(block !== null, '应存在 .ar_top 样式块')
+	assert.match(block[1], /position:\s*sticky/, '.ar_top 必须吸顶')
 	assert.match(block[1], /top:\s*0/, '吸顶条要贴在滚动容器顶部')
 	const background = /background:\s*([^;]+);/.exec(block[1])
 	assert.ok(background !== null, '吸顶条要有底色，否则滚动内容会从它底下透出来')
@@ -734,20 +743,20 @@ test('client 内部件：文件路径把 $DSH_HOME 缩成 ~（窄栏里一行放
 })
 
 test('client bundle：列式字段里的输入框不许被 flex-basis 撑成高盒子（源码级守卫）', () => {
-	// 项目卡片的「项目目录」「别名」是 .dr_field（column 容器）的子元素，而 .dr_pathInput /
-	// .dr_labelInput 带 flex: 1 1 200px —— 在 column 方向 flex-basis 会当成**高度**，
+	// 项目卡片的「项目目录」「别名」是 .ar_field（column 容器）的子元素，而 .ar_pathInput /
+	// .ar_labelInput 带 flex: 1 1 200px —— 在 column 方向 flex-basis 会当成**高度**，
 	// 单行输入框一度被撑成 200px 高，整张项目卡片虚高成两屏。Node 里没有布局可测，
-	// 只能钉住这条：「行内自适应」只留给 .dr_row 的直接子元素，字段里的控件一律 0 0 auto。
+	// 只能钉住这条：「行内自适应」只留给 .ar_row 的直接子元素，字段里的控件一律 0 0 auto。
 	const source = readFileSync(bundlePath, 'utf8')
-	assert.ok(/\.dr_field\s*>\s*\.dr_input[^{]*\{[^}]*flex:\s*0\s+0\s+auto/.test(source), '.dr_field 的直接子输入框必须 flex: 0 0 auto')
-	assert.ok(/\.dr_row\s*>\s*\.dr_pathInput\s*\{[^}]*flex:\s*1\s+1/.test(source), '行容器里的目录框才用 flex: 1 1')
-	assert.equal(/^\.dr_pathInput\s*\{[^}]*flex:\s*1\s+1/m.test(source), false, '.dr_pathInput 不能自己带行内 flex，它也会出现在列式字段里')
-	// .dr_field 自己也会当 .dr_project（column 容器）的直接子元素：它一旦带 flex-basis，
+	assert.ok(/\.ar_field\s*>\s*\.ar_input[^{]*\{[^}]*flex:\s*0\s+0\s+auto/.test(source), '.ar_field 的直接子输入框必须 flex: 0 0 auto')
+	assert.ok(/\.ar_row\s*>\s*\.ar_pathInput\s*\{[^}]*flex:\s*1\s+1/.test(source), '行容器里的目录框才用 flex: 1 1')
+	assert.equal(/^\.ar_pathInput\s*\{[^}]*flex:\s*1\s+1/m.test(source), false, '.ar_pathInput 不能自己带行内 flex，它也会出现在列式字段里')
+	// .ar_field 自己也会当 .ar_project（column 容器）的直接子元素：它一旦带 flex-basis，
 	// 整个字段块就按那个数值定高，项目卡片中间会空出一整段空白。
-	const field = /^\.dr_field\s*\{([^}]*)\}/m.exec(source)
-	assert.ok(field !== null, '应存在 .dr_field 样式块')
-	assert.equal(/flex\s*:/.test(field[1]), false, '.dr_field 自身不能声明 flex（列式父容器会把它当高度用）')
-	assert.ok(/\.dr_projectRow\s*>\s*\.dr_field[^{]*\{[^}]*flex:\s*1\s+1/.test(source), '横向分配交给行容器')
+	const field = /^\.ar_field\s*\{([^}]*)\}/m.exec(source)
+	assert.ok(field !== null, '应存在 .ar_field 样式块')
+	assert.equal(/flex\s*:/.test(field[1]), false, '.ar_field 自身不能声明 flex（列式父容器会把它当高度用）')
+	assert.ok(/\.ar_projectRow\s*>\s*\.ar_field[^{]*\{[^}]*flex:\s*1\s+1/.test(source), '横向分配交给行容器')
 })
 
 test('client 内部件：页签是 3 + N（全局规则 / 项目名册 / 每个项目一页 / 效果预览）', () => {
@@ -810,14 +819,14 @@ test('client 内部件：规则按用户分组归拢，顺序与注入文本一�
 test('client bundle：规则卡两列式网格与「窄栏退单列」（源码级守卫）', () => {
 	// Node 里没有布局可测，只能钉住这几条：默认单列，够宽才两列，且容器查询要有容器。
 	const source = readFileSync(bundlePath, 'utf8')
-	assert.ok(/\.dr_panel\s*\{[^}]*container-type:\s*inline-size/.test(source), '.dr_panel 必须是容器查询的容器')
-	const grid = /\.dr_rulesGrid\s*\{([^}]*)\}/.exec(source)
-	assert.ok(grid !== null, '应存在 .dr_rulesGrid 样式块')
+	assert.ok(/\.ar_panel\s*\{[^}]*container-type:\s*inline-size/.test(source), '.ar_panel 必须是容器查询的容器')
+	const grid = /\.ar_rulesGrid\s*\{([^}]*)\}/.exec(source)
+	assert.ok(grid !== null, '应存在 .ar_rulesGrid 样式块')
 	assert.match(grid[1], /grid-template-columns:\s*minmax\(0,\s*1fr\)/, '默认单列（窄栏）')
-	assert.ok(/@container\s*\(\s*min-width:\s*520px\s*\)\s*\{\s*\.dr_rulesGrid\s*\{[^}]*repeat\(2,/.test(source), '够宽时两列')
+	assert.ok(/@container\s*\(\s*min-width:\s*520px\s*\)\s*\{\s*\.ar_rulesGrid\s*\{[^}]*repeat\(2,/.test(source), '够宽时两列')
 	// 卡片系统：这几类块共用同一组形状变量，不许各写一套圆角
-	const shared = /\.dr_card,\s*\.dr_empty,\s*\.dr_onboarding,\s*\.dr_identity\s*\{([^}]*)\}/.exec(source)
+	const shared = /\.ar_card,\s*\.ar_empty,\s*\.ar_onboarding,\s*\.ar_identity\s*\{([^}]*)\}/.exec(source)
 	assert.ok(shared !== null, '规则卡 / 空态 / 上手块 / 身份栏应共用一条卡片样式')
-	assert.match(shared[1], /var\(--dr-radius\)/)
-	assert.match(shared[1], /var\(--dr-line\)/)
+	assert.match(shared[1], /var\(--ar-radius\)/)
+	assert.match(shared[1], /var\(--ar-line\)/)
 })

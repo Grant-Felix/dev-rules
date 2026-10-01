@@ -89,7 +89,7 @@ cmd="${1:-boot}"
 # 客户端 bundle 注册的 id 必须等于包名。DSH 的客户端模块图是按**包名**建行的
 # （dsh-client-modules：`table.set(packageName, { entry: graphRow(packageName, …) })`），
 # 对不上就在启动时报「Failed to load plugins：loaded without registering …」——
-# 界面直接打不开，而宿主接口还是好的：只 curl /dev-rules/state 根本看不出来。
+# 界面直接打不开，而宿主接口还是好的：只 curl /agent-rules/state 根本看不出来。
 #
 # 仓库里的用例只保证「检出里的文件」一致；这里保证**沙箱里装的那一份**一致 ——
 # 来源换成 github: / git+… 时，两者未必是同一份代码。
