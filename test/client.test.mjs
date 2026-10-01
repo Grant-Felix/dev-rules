@@ -282,7 +282,8 @@ test('client 内部件：保存前拦下会被宿主静默丢掉的内容', () =
 	assert.equal(blankGlobal.tab, 'global')
 	assert.match(blankGlobal.text, /有 1 条规则的标题和正文都是空的/)
 	const blankProject = validateDoc(doc([], [{ id: 'p', path: '/tmp/p', rules: [rule('  ', '')] }]), limits)
-	assert.equal(blankProject.tab, 'projects')
+	// 出问题的规则在哪个项目的页里，就跳到那一页：丢到「项目」名册上还得用户自己找
+	assert.equal(blankProject.tab, 'p:p')
 	assert.match(blankProject.text, /有 1 条规则/)
 
 	// 超过每列表上限：多余的会被丢掉
@@ -293,7 +294,7 @@ test('client 内部件：保存前拦下会被宿主静默丢掉的内容', () =
 		doc([], [{ id: 'p', path: '/tmp/p', label: '博客', rules: [rule('A', 'a'), rule('B', 'b'), rule('C', 'c'), rule('D', 'd')] }]),
 		limits,
 	)
-	assert.equal(overProject.tab, 'projects')
+	assert.equal(overProject.tab, 'p:p')
 	assert.match(overProject.text, /项目「博客」有 4 条规则，超过上限 3 条/)
 })
 
@@ -747,4 +748,76 @@ test('client bundle：列式字段里的输入框不许被 flex-basis 撑成高�
 	assert.ok(field !== null, '应存在 .dr_field 样式块')
 	assert.equal(/flex\s*:/.test(field[1]), false, '.dr_field 自身不能声明 flex（列式父容器会把它当高度用）')
 	assert.ok(/\.dr_projectRow\s*>\s*\.dr_field[^{]*\{[^}]*flex:\s*1\s+1/.test(source), '横向分配交给行容器')
+})
+
+test('client 内部件：页签是 3 + N（全局规则 / 项目名册 / 每个项目一页 / 效果预览）', () => {
+	const { registration, require } = loadBundle()
+	const { panelTabs } = registration.factory(require).__internal
+
+	const tabs = panelTabs({
+		global: [{ id: 'g1', title: 'A', content: 'a', group: '' }, { id: 'g2', title: 'B', content: 'b', group: '' }],
+		projects: [
+			{ id: 'p1', label: '博客', path: '/x/blog', rules: [{ id: 'r1', title: 'R', content: 'r', group: '' }] },
+			{ id: 'p2', label: '', path: '/x/site', rules: [] },
+		],
+	})
+	assert.deepEqual(tabs.map((tab) => tab.key), ['global', 'projects', 'p:p1', 'p:p2', 'preview'])
+	// 项目页签用别名，没有别名就用目录末段；计数是各自页里的规则条数
+	assert.deepEqual(tabs.map((tab) => tab.label), ['全局规则', '项目', '博客', 'site', '效果预览'])
+	assert.deepEqual(tabs.map((tab) => tab.count), [2, 2, 1, 0, null])
+
+	// 没有项目时就是三个固定页签
+	assert.deepEqual(panelTabs({ global: [], projects: [] }).map((tab) => tab.key), ['global', 'projects', 'preview'])
+})
+
+test('client 内部件：项目页签名（别名 / 目录末段 / 新项目）', () => {
+	const { registration, require } = loadBundle()
+	const { projectTabLabel } = registration.factory(require).__internal
+
+	assert.equal(projectTabLabel({ label: '博客', path: '/x/blog' }), '博客')
+	assert.equal(projectTabLabel({ label: '   ', path: '/x/blog' }), 'blog')
+	assert.equal(projectTabLabel({ label: '', path: '/x/blog/' }), 'blog', '尾部分隔符不该当成名字')
+	assert.equal(projectTabLabel({ label: '', path: 'C:\\work\\proj' }), 'proj', 'Windows 风格路径同样取末段')
+	assert.equal(projectTabLabel({ label: '', path: '' }), '新项目')
+})
+
+test('client 内部件：规则按用户分组归拢，顺序与注入文本一致', () => {
+	const { registration, require } = loadBundle()
+	const { groupBuckets, collectGroups, matchesFilter } = registration.factory(require).__internal
+
+	const rules = [
+		{ id: 'a', title: 'A', content: 'a', group: '流程' },
+		{ id: 'b', title: 'B', content: 'b', group: '' },
+		{ id: 'c', title: 'C', content: 'c', group: '流程' },
+		{ id: 'd', title: 'Deploy', content: 'd', group: '发布' },
+	]
+	const buckets = groupBuckets(rules)
+	// 组名按首次出现排序，未分组是一个普通桶（''）
+	assert.deepEqual(buckets.map((bucket) => bucket.group), ['流程', '', '发布'])
+	assert.deepEqual(buckets[0].items.map((item) => item.index), [0, 2], '同组规则并到一起，顺序不变')
+	assert.deepEqual(buckets[1].items.map((item) => item.index), [1])
+	assert.deepEqual(collectGroups(rules), ['流程', '发布'])
+
+	// 筛选：按组、只要未分组、关键词（标题大小写不敏感）
+	assert.equal(matchesFilter(rules[0], '', '流程'), true)
+	assert.equal(matchesFilter(rules[1], '', '流程'), false)
+	assert.equal(matchesFilter(rules[1], '', '__none__'), true)
+	assert.equal(matchesFilter(rules[0], '', '__none__'), false)
+	assert.equal(matchesFilter(rules[3], 'deploy', ''), true)
+	assert.equal(matchesFilter(rules[1], 'zzz', ''), false)
+})
+
+test('client bundle：规则卡两列式网格与「窄栏退单列」（源码级守卫）', () => {
+	// Node 里没有布局可测，只能钉住这几条：默认单列，够宽才两列，且容器查询要有容器。
+	const source = readFileSync(bundlePath, 'utf8')
+	assert.ok(/\.dr_panel\s*\{[^}]*container-type:\s*inline-size/.test(source), '.dr_panel 必须是容器查询的容器')
+	const grid = /\.dr_rulesGrid\s*\{([^}]*)\}/.exec(source)
+	assert.ok(grid !== null, '应存在 .dr_rulesGrid 样式块')
+	assert.match(grid[1], /grid-template-columns:\s*minmax\(0,\s*1fr\)/, '默认单列（窄栏）')
+	assert.ok(/@container\s*\(\s*min-width:\s*520px\s*\)\s*\{\s*\.dr_rulesGrid\s*\{[^}]*repeat\(2,/.test(source), '够宽时两列')
+	// 卡片系统：这几类块共用同一组形状变量，不许各写一套圆角
+	const shared = /\.dr_card,\s*\.dr_empty,\s*\.dr_onboarding,\s*\.dr_identity\s*\{([^}]*)\}/.exec(source)
+	assert.ok(shared !== null, '规则卡 / 空态 / 上手块 / 身份栏应共用一条卡片样式')
+	assert.match(shared[1], /var\(--dr-radius\)/)
+	assert.match(shared[1], /var\(--dr-line\)/)
 })
