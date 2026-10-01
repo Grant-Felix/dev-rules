@@ -718,3 +718,33 @@ test('client bundle：更新条只在有内容时渲染、重启前必须确认�
 	assert.match(source, /if \(isOperationTerminal\(next\)\) \{\s*setOperationId\(null\)/)
 	assert.match(source, /clearInterval\(timer\)/)
 })
+
+test('client 内部件：文件路径把 $DSH_HOME 缩成 ~（窄栏里一行放得下）', () => {
+	const { registration, require } = loadBundle()
+	const { prettyPath } = registration.factory(require).__internal
+
+	assert.equal(prettyPath('/home/felix/.dsh/dev-rules.json', '/home/felix/.dsh'), '~/dev-rules.json')
+	assert.equal(prettyPath('/home/felix/.dsh/dev-rules.json.bak', '/home/felix/.dsh'), '~/dev-rules.json.bak')
+	assert.equal(prettyPath('/home/felix/.dsh', '/home/felix/.dsh'), '~')
+	// 不在 home 下面、或宿主没给 home：原样显示，不做猜测
+	assert.equal(prettyPath('/etc/dev-rules.json', '/home/felix/.dsh'), '/etc/dev-rules.json')
+	assert.equal(prettyPath('/home/felix/.dsh/dev-rules.json', ''), '/home/felix/.dsh/dev-rules.json')
+	assert.equal(prettyPath(undefined, '/home/felix/.dsh'), '')
+})
+
+test('client bundle：列式字段里的输入框不许被 flex-basis 撑成高盒子（源码级守卫）', () => {
+	// 项目卡片的「项目目录」「别名」是 .dr_field（column 容器）的子元素，而 .dr_pathInput /
+	// .dr_labelInput 带 flex: 1 1 200px —— 在 column 方向 flex-basis 会当成**高度**，
+	// 单行输入框一度被撑成 200px 高，整张项目卡片虚高成两屏。Node 里没有布局可测，
+	// 只能钉住这条：「行内自适应」只留给 .dr_row 的直接子元素，字段里的控件一律 0 0 auto。
+	const source = readFileSync(bundlePath, 'utf8')
+	assert.ok(/\.dr_field\s*>\s*\.dr_input[^{]*\{[^}]*flex:\s*0\s+0\s+auto/.test(source), '.dr_field 的直接子输入框必须 flex: 0 0 auto')
+	assert.ok(/\.dr_row\s*>\s*\.dr_pathInput\s*\{[^}]*flex:\s*1\s+1/.test(source), '行容器里的目录框才用 flex: 1 1')
+	assert.equal(/^\.dr_pathInput\s*\{[^}]*flex:\s*1\s+1/m.test(source), false, '.dr_pathInput 不能自己带行内 flex，它也会出现在列式字段里')
+	// .dr_field 自己也会当 .dr_project（column 容器）的直接子元素：它一旦带 flex-basis，
+	// 整个字段块就按那个数值定高，项目卡片中间会空出一整段空白。
+	const field = /^\.dr_field\s*\{([^}]*)\}/m.exec(source)
+	assert.ok(field !== null, '应存在 .dr_field 样式块')
+	assert.equal(/flex\s*:/.test(field[1]), false, '.dr_field 自身不能声明 flex（列式父容器会把它当高度用）')
+	assert.ok(/\.dr_projectRow\s*>\s*\.dr_field[^{]*\{[^}]*flex:\s*1\s+1/.test(source), '横向分配交给行容器')
+})
